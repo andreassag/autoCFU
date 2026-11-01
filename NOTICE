@@ -1,0 +1,45 @@
+AutoCFU Colony Detection and Inference System
+Copyright 2024-2026 Andreas Sagen
+
+This product includes software developed by Andreas Sagen.
+
+================================================================================
+Third-Party Software and Datasets Notice
+================================================================================
+
+1. RT-DETRv2 (Real-Time DEtection TRansformer v2)
+   Website: https://github.com/lyuwenyu/RT-DETR
+   License: Apache License 2.0 (see licenses/LICENSE-RT-DETRv2.txt)
+   Copyright (c) 2024 lyuwenyu
+   Reference:
+     Wenyu Lv, Yian Zhao, Qinyao Chang, Kui Huang, Guanzhong Wang, Yi Liu.
+     "RT-DETRv2: Improved Baseline with Bag-of-Freebies for Real-Time Detection Transformer."
+     arXiv preprint arXiv:2407.17140, 2024.
+
+2. AGAR Dataset (Annotated Germs for Automated Recognition)
+   Website: https://agar.neurosys.com/
+   Hugging Face: https://huggingface.co/datasets/leodriesch/agar
+   License: Creative Commons Attribution-NonCommercial 2.0 Generic (CC BY-NC 2.0)
+            (see licenses/LICENSE-AGAR-DATASET.txt)
+   Copyright (c) NeuroSYS and University of Wrocław
+   Reference:
+     Majchrowska, S., Pawłowski, J., Guła, G., Bonnefond, T., Kostrzewa, A.,
+     Pawlak, A., Derby, M. M., & Brzychczy, E.
+     "AGAR a microbial colony dataset for deep learning detection."
+     Data in Brief, 39, 107641, 2021. https://doi.org/10.1016/j.dib.2021.107641
+   IMPORTANT COMPLIANCE NOTICE:
+     The AGAR dataset is provided under the Creative Commons Attribution-NonCommercial
+     2.0 Generic license (CC BY-NC 2.0). Any derivative tiled datasets produced by the
+     preparation scripts (including 01-prepare-AGAR-dataset.ipynb) and any model weights
+     fine-tuned on the AGAR dataset (including 02-train-RT-DETRv2-colony-detection.ipynb)
+     are restricted to academic, educational, and non-commercial research use only.
+     The software code in this repository is licensed under Apache-2.0.
+
+3. SAHI (Slicing Aided Hyper Inference)
+   Website: https://github.com/obss/sahi
+   License: MIT License (see licenses/LICENSE-SAHI.txt)
+   Copyright (c) 2021 Fatih Cagatay Akyon
+   Reference:
+     Akyon, F. C., Altinuc, S. O., & Temizel, A.
+     "Slicing Aided Hyper Inference and Fine-tuning for Small Object Detection."
+     2022 IEEE International Conference on Image Processing (ICIP), 966-970, 2022.

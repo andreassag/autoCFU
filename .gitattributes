@@ -1,0 +1,31 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Explicit text files
+*.py text diff=python eol=lf
+*.ipynb text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf
+
+# Binary files
+*.onnx binary
+*.pth binary
+*.pt binary
+*.bin binary
+*.tar binary
+*.tar.gz binary
+*.zip binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.bmp binary
+*.tif binary
+*.tiff binary

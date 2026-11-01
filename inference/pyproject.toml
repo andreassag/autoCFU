@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autocfu"
+version = "0.1.0"
+description = "AutoCFU: High-resolution sliced inference engine for microbial colony detection and counting"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Andreas Sagen", email = "30706568+andreassag@users.noreply.github.com"}
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "onnxruntime>=1.14.0",
+    "pillow>=9.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pre-commit>=3.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+autocfu = "autocfu.cli:main"
+autocfu-infer = "autocfu.cli:main"
+agar-infer = "autocfu.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["autocfu"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = []

@@ -1,0 +1,67 @@
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python Bytecode and Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing and Linters
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# Pre-commit Cache
+.cache/
+
+# Datasets and Archives
+data/
+dataset/
+agar_tiled_dataset/
+*.tar
+*.tar.gz
+*.zip
+
+# Trained Model Weights and ONNX Artifacts
+*.onnx
+*.pth
+*.pt
+*.bin
+models/*.onnx
+models/*.pth
+models/*.pt
+
+# Inference Output Directories
+results/
+runs/
+
+# IDE and OS Artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets and Credentials
+.env
+*.key
+token.txt
+
+# Documentation & Guidelines
+!AGENTS.md
