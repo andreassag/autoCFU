@@ -1,9 +1,10 @@
 """Command-line interface for the AutoCFU colony detection engine."""
 
+from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from .config import load_config
 from .pipeline import AutoCFUEngine, InferenceResult, export_batch_summary_csv
@@ -110,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def find_default_config() -> Optional[str]:
+def find_default_config() -> str | None:
     """Search common locations for configs/default_inference.yaml."""
     candidates = [
         Path("configs/default_inference.yaml"),
@@ -123,7 +124,7 @@ def find_default_config() -> Optional[str]:
     return None
 
 
-def main(args_list: Optional[List[str]] = None) -> int:
+def main(args_list: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(args_list)
 
@@ -148,7 +149,7 @@ def main(args_list: Optional[List[str]] = None) -> int:
         config.inference.postprocess_match_threshold = args.match_threshold
 
     # 2. Gather image paths
-    image_paths: List[Path] = []
+    image_paths: list[Path] = []
     if args.image:
         p = Path(args.image)
         if not p.is_file():
@@ -190,7 +191,7 @@ def main(args_list: Optional[List[str]] = None) -> int:
         f"merger={config.inference.merger_type}"
     )
 
-    results: List[InferenceResult] = []
+    results: list[InferenceResult] = []
     total_colonies = 0
 
     for idx, img_path in enumerate(image_paths, start=1):

@@ -22,21 +22,21 @@ autoCFU/
 │       └── dependabot-auto-merge.yml # Automated Dependabot PR approval and auto-merge
 ├── configs/
 │   └── default_inference.yaml  # Default slicing, overlap, and merger parameters
-├── inference/                  # Standalone Python inference engine
-│   ├── pyproject.toml          # Package configuration and dependencies
-│   ├── autocfu/
-│   │   ├── __init__.py         # Public exports
-│   │   ├── cli.py              # CLI entry point (autocfu, autocfu-infer, agar-infer)
-│   │   ├── config.py           # Configuration schema and YAML parser
-│   │   ├── merger.py           # Greedy Non-Maximum Merging (GreedyNMM & NMS)
-│   │   ├── model.py            # ONNX Runtime session manager and post-processing
-│   │   ├── pipeline.py         # Full-dish sliced inference orchestrator
-│   │   └── slicer.py           # 2D grid window tiling and coordinate translation
-│   └── tests/                  # Unit and integration test suite
+├── src/
+│   └── autocfu/                # Standalone Python inference engine
+│       ├── __init__.py         # Public exports
+│       ├── cli.py              # CLI entry point (autocfu, autocfu-infer, agar-infer)
+│       ├── config.py           # Configuration schema and YAML parser
+│       ├── merger.py           # Greedy Non-Maximum Merging (GreedyNMM & NMS)
+│       ├── model.py            # ONNX Runtime session manager and post-processing
+│       ├── pipeline.py         # Full-dish sliced inference orchestrator
+│       └── slicer.py           # 2D grid window tiling and coordinate translation
+├── tests/                      # Unit and integration test suite
 ├── models/
 │   └── README.md               # Model artifact specifications and export instructions
 ├── scripts/
 │   └── update_dependencies.sh  # Automated dependency update and verification script
+├── pyproject.toml              # Package configuration, dependencies, uv_build, ruff, and ty
 ├── Makefile                    # Standard developer automation targets
 ├── .pre-commit-config.yaml     # Pre-commit hooks for code hygiene
 └── AGENTS.md                   # This guideline document
@@ -83,6 +83,7 @@ All Python code in `autoCFU` must meet high engineering standards:
 
 ### 2.1 Modern Python 3.10+ Typing
 - Target Python `>=3.10`.
+- Always include `from __future__ import annotations` at the top of every Python file.
 - Use built-in generic types for collections: `list[...]`, `dict[...]`, `tuple[...]`, `set[...]` (do not import `List`, `Dict`, `Tuple`, `Set` from `typing`).
 - Use the union operator `|` for optional types and type unions: `str | None` or `int | float` (prefer over `Optional[...]` or `Union[...]` in new code).
 - Annotate all function signatures, method arguments, return types, and dataclass fields completely.
@@ -131,11 +132,13 @@ def merge_detections(
 - Document mathematical coordinate transformations, clipping edge cases, and algorithm choices (e.g., why IoS is advantageous for detecting clustered small colonies adjacent to larger ones).
 - Keep module header docstrings clear and concise.
 
-### 2.4 Formatting and Linting (Ruff)
+### 2.4 Formatting, Linting, and Type Checking (Ruff & ty)
+- Build backend: **`uv_build`** in `pyproject.toml`.
 - Line length limit: **120 characters**.
-- Target Python version: **py310**.
+- Target Python version: **py310** (`python-version = "3.10"`).
 - Enabled lint rules: `E` (pycodestyle errors), `F` (Pyflakes), `W` (pycodestyle warnings), `I` (isort import sorting).
-- Run `make format` and `make lint` before committing. Code must pass with zero errors and zero warnings.
+- Static type checking is enforced with Astral's **`ty`** (`ty check src/ tests/`).
+- Run `make format`, `make lint`, and `make typecheck` before committing. Code must pass with zero errors and zero warnings.
 
 ---
 
@@ -197,14 +200,15 @@ The repository includes a comprehensive `Makefile` providing standardized develo
 
 | Command | Description |
 | :--- | :--- |
-| `make install` | Creates virtual environment (`uv` preferred, fallback to `python3 -m venv`), installs `inference[dev]` in editable mode, and configures pre-commit hooks. |
-| `make test` | Executes unit tests via `pytest inference/tests`. |
-| `make lint` | Runs `ruff check inference/` across the codebase. |
-| `make format` | Formats Python code using `ruff format inference/`. |
+| `make install` | Creates virtual environment (`uv` preferred, fallback to `python3 -m venv`), installs `.[dev]` in editable mode, and configures pre-commit hooks. |
+| `make test` | Executes unit tests via `pytest tests`. |
+| `make lint` | Runs `ruff check src/ tests/` and `ty check src/ tests/` across the codebase. |
+| `make typecheck` | Runs static type checking via `ty check src/ tests/`. |
+| `make format` | Formats Python code using `ruff format src/ tests/`. |
 | `make pre-commit` | Runs pre-commit hooks across all staged and repository files. |
 | `make clean` | Cleans build artifacts, egg metadata, and Python test caches. |
 | `make act` | Executes GitHub Actions CI workflow locally using `act` / `gh act`. |
-| `make update-deps` | Executes `scripts/update_dependencies.sh` to upgrade dependencies and run formatting, linting, and tests. |
+| `make update-deps` | Executes `scripts/update_dependencies.sh` to upgrade dependencies and run formatting, linting, type checking, and tests. |
 
 ---
 
@@ -212,26 +216,28 @@ The repository includes a comprehensive `Makefile` providing standardized develo
 
 ### 5.1 GitHub Actions CI (`.github/workflows/ci.yml`)
 - Automatically runs on `push` and `pull_request` to the `main` branch.
+- **Trigger Guardrails (`paths-ignore`)**: To avoid redundant test matrix runs, CI is skipped when commits/PRs modify only documentation (`docs/**`, `notebooks/**`, `**/*.md`), legal assets (`LICENSE*`, `NOTICE*`, `licenses/**`), git configurations (`.gitignore`, `.gitattributes`), pre-commit hooks (`.pre-commit-config.yaml`), or model card metadata (`models/**`). Any change touching Python package source code (`src/`), tests (`tests/`), dependencies (`pyproject.toml`), or CI workflows triggers the full pipeline.
 - Test matrix covers **Python 3.10, 3.11, and 3.12**.
 - CI workflow execution steps:
-  1. Check out repository via `actions/checkout@v4`.
-  2. Set up Python runtime via `actions/setup-python@v5` with pip caching on `inference/pyproject.toml`.
-  3. Install dependencies: `pip install -e "./inference[dev]"`.
-  4. Format verification: `ruff format --check inference/`.
-  5. Linter verification: `ruff check inference/`.
-  6. Test execution: `pytest inference/tests/`.
+  1. Check out repository via `actions/checkout@v7`.
+  2. Set up Python runtime via `actions/setup-python@v7` and `astral-sh/setup-uv@v7`.
+  3. Install dependencies: `uv pip install --system -e ".[dev]"`.
+  4. Format verification: `ruff format --check src/ tests/`.
+  5. Linter verification: `ruff check src/ tests/`.
+  6. Static type checking: `ty check src/ tests/`.
+  7. Test execution: `pytest tests/`.
 
 ### 5.2 Dependabot Configuration (`.github/dependabot.yml`)
 - Configured with `version: 2`.
 - Automatically checks for updates weekly:
-  - `pip` ecosystem: monitors `/inference` (`inference/pyproject.toml`).
+  - `pip` ecosystem: monitors `/` (`pyproject.toml`).
   - `github-actions` ecosystem: monitors `/` (`.github/workflows/ci.yml`).
 - Caps open pull requests at 10 to prevent backlog noise.
 
 ### 5.3 Dependabot Auto-Merge Workflow
 Dependabot pull requests are automatically approved and merged once all CI checks succeed:
-- **Approval & Auto-Merge Queueing** (`.github/workflows/dependabot-auto-merge.yml`): Runs on Dependabot pull request events (`opened`, `synchronize`, `reopened`). Evaluates metadata using `dependabot/fetch-metadata@v2`, approves the pull request, and queues auto-merge with `gh pr merge --auto`.
-- **Post-CI Verification Gate** (`.github/workflows/ci.yml`): The `dependabot-automerge` job depends strictly on `test` matrix completion (`needs: test`). It ensures that pull requests are merged only after format checks, lint checks, and unit tests pass across all supported Python versions (3.10, 3.11, 3.12).
+- **Approval & Auto-Merge Queueing** (`.github/workflows/dependabot-auto-merge.yml`): Runs on Dependabot pull request events (`opened`, `synchronize`, `reopened`). Evaluates metadata using `dependabot/fetch-metadata@v3`, approves the pull request, and queues auto-merge with `gh pr merge --auto`.
+- **Post-CI Verification Gate** (`.github/workflows/ci.yml`): The `dependabot-automerge` job depends strictly on `test` matrix completion (`needs: test`). It ensures that pull requests are merged only after format checks, lint checks, type checks, and unit tests pass across all supported Python versions (3.10, 3.11, 3.12).
 - **Merge Strategy**: Attempts merge commit (`--merge`) with graceful fallback to squash (`--squash`) depending on repository branch settings.
 - **Required Repository Permissions**:
   1. *Allow GitHub Actions to approve PRs*: In **Settings > Actions > General > Workflow permissions**, enable **"Allow GitHub Actions to create and approve pull requests"**.
@@ -252,22 +258,22 @@ gh act pull_request
 
 Whenever modifying existing features or introducing new capabilities, follow this step-by-step checklist:
 
-1. **Code Implementation**
+1. **Code Implementation (`src/autocfu/`)**
    - Ensure code conforms to Python 3.10+ typing standards or Rust 2021+ guidelines.
-   - Do not add heavy training dependencies (e.g., PyTorch) to `inference/pyproject.toml`.
+   - Do not add heavy training dependencies (e.g., PyTorch) to `pyproject.toml`.
    - Never commit `.ipynb` notebooks or C++ files to this repository.
 
-2. **Test Coverage**
-   - Add or update corresponding unit tests in `inference/tests/`.
+2. **Test Coverage (`tests/`)**
+   - Add or update corresponding unit tests in `tests/`.
    - Cover boundary conditions: empty images, zero detections, single-tile vs multi-tile images, invalid inputs.
 
 3. **Documentation & Configurations**
-   - If CLI options or inference defaults change, update `configs/default_inference.yaml`, `README.md`, and `inference/README.md`.
+   - If CLI options or inference defaults change, update `configs/default_inference.yaml` and `README.md`.
    - If ONNX tensor signatures change, update `models/README.md` and document the contract in `AGENTS.md`.
 
-4. **Formatting & Linting**
+4. **Formatting, Linting & Type Checking**
    - Format: `make format`
-   - Lint: `make lint` (must pass with 0 errors)
+   - Lint & Type-Check: `make lint` / `make typecheck` (must pass with 0 errors in both `ruff` and `ty`)
 
 5. **Unit Tests Execution**
    - Run tests: `make test` (all tests must pass)

@@ -1,5 +1,7 @@
 """Unit tests for calculate_iou, GreedyNMM, and NMS mergers."""
 
+from __future__ import annotations
+
 import unittest
 
 from autocfu.merger import NMS, Detection, GreedyNMM, calculate_ios, calculate_iou, get_merger

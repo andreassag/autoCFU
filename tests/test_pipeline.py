@@ -1,10 +1,11 @@
 """Unit tests for AutoCFUEngine pipeline, config, and output serializers."""
 
+from __future__ import annotations
+
 import json
 import tempfile
 import unittest
 from pathlib import Path
-from typing import List
 
 import numpy as np
 from PIL import Image
@@ -17,16 +18,16 @@ from autocfu.pipeline import AgarInferenceEngine, AutoCFUEngine, InferenceResult
 class MockModel:
     """Mock model that returns deterministic detections for pipeline testing."""
 
-    def __init__(self, detections_per_slice: List[Detection]) -> None:
+    def __init__(self, detections_per_slice: list[Detection]) -> None:
         self.detections = detections_per_slice
 
     def predict_slice(
         self,
         crop: np.ndarray,
         confidence_threshold: float = 0.35,
-        target_class_id: int = 0,
+        target_class_id: int | None = 0,
         class_name: str = "colony",
-    ) -> List[Detection]:
+    ) -> list[Detection]:
         # Return detections that meet confidence threshold and target class
         return [
             d
@@ -106,7 +107,7 @@ class TestPipeline(unittest.TestCase):
             res.save_json(json_file)
             self.assertTrue(json_file.is_file())
 
-            with open(json_file, "r") as f:
+            with open(json_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.assertEqual(data["colony_count"], 1)
             self.assertEqual(data["image_width"], 500)
@@ -174,6 +175,7 @@ class TestPipeline(unittest.TestCase):
         img = Image.new("RGB", (200, 200), color=(128, 128, 128))
         res_with_raw = engine.infer_image(img, return_raw=True)
         self.assertIsNotNone(res_with_raw.raw_detections)
+        assert res_with_raw.raw_detections is not None
         self.assertEqual(len(res_with_raw.raw_detections), 1)
 
         res_without_raw = engine.infer_image(img, return_raw=False)

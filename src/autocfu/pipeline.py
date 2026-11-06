@@ -1,11 +1,13 @@
 """End-to-end full plate sliced inference pipeline."""
 
+from __future__ import annotations
+
 import csv
 import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Sequence
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -20,26 +22,26 @@ from .slicer import PlateSlicer
 class InferenceResult:
     """Full-dish inference results, detections, and execution statistics."""
 
-    image_path: Optional[str]
-    image_size: Tuple[int, int]  # (width, height)
-    detections: List[Detection]
+    image_path: str | None
+    image_size: tuple[int, int]  # (width, height)
+    detections: list[Detection]
     colony_count: int
     num_slices: int
     execution_time_seconds: float
-    raw_detections: Optional[List[Detection]] = None
+    raw_detections: list[Detection] | None = None
 
     @property
-    def bboxes(self) -> List[Tuple[float, float, float, float]]:
+    def bboxes(self) -> list[tuple[float, float, float, float]]:
         """Return list of bounding boxes [(x1, y1, x2, y2), ...] in global coordinates."""
         return [d.bbox for d in self.detections]
 
     @property
-    def centers(self) -> List[Tuple[float, float]]:
+    def centers(self) -> list[tuple[float, float]]:
         """Return list of colony centroid coordinates [(cx, cy), ...] in global coordinates."""
         return [d.center for d in self.detections]
 
     @property
-    def scores(self) -> List[float]:
+    def scores(self) -> list[float]:
         """Return list of confidence scores."""
         return [d.score for d in self.detections]
 
@@ -64,7 +66,7 @@ class InferenceResult:
         x2: float,
         y2: float,
         by_center: bool = True,
-    ) -> List[Detection]:
+    ) -> list[Detection]:
         """Return detections located within a rectangular region of interest [x1, y1, x2, y2]."""
         matches = []
         for det in self.detections:
@@ -82,7 +84,7 @@ class InferenceResult:
         cx: float,
         cy: float,
         radius: float,
-    ) -> List[Detection]:
+    ) -> list[Detection]:
         """Return detections whose center falls within a circle (e.g. a pipetted drop spot)."""
         r_sq = radius * radius
         matches = []
@@ -92,8 +94,8 @@ class InferenceResult:
                 matches.append(det)
         return matches
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "image_path": self.image_path,
             "image_width": self.image_size[0],
             "image_height": self.image_size[1],
@@ -109,13 +111,13 @@ class InferenceResult:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent)
 
-    def save_json(self, output_path: Union[str, Path], indent: int = 2) -> None:
+    def save_json(self, output_path: str | Path, indent: int = 2) -> None:
         target = Path(output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "w", encoding="utf-8") as f:
             f.write(self.to_json(indent=indent))
 
-    def save_csv(self, output_path: Union[str, Path]) -> None:
+    def save_csv(self, output_path: str | Path) -> None:
         """Write detections bounding boxes and scores to CSV."""
         target = Path(output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -138,9 +140,9 @@ class InferenceResult:
 
     def draw_overlay(
         self,
-        output_path: Optional[Union[str, Path]] = None,
-        image: Optional[Union[Image.Image, np.ndarray]] = None,
-        box_color: Tuple[int, int, int] = (255, 0, 0),
+        output_path: str | Path | None = None,
+        image: Image.Image | np.ndarray | None = None,
+        box_color: tuple[int, int, int] = (255, 0, 0),
         box_width: int = 3,
         show_score: bool = True,
     ) -> Image.Image:
@@ -159,7 +161,7 @@ class InferenceResult:
         draw = ImageDraw.Draw(pil_img)
         font = ImageFont.load_default()
 
-        for idx, det in enumerate(self.detections):
+        for det in self.detections:
             draw.rectangle(
                 [det.x1, det.y1, det.x2, det.y2],
                 outline=box_color,
@@ -187,9 +189,9 @@ class AutoCFUEngine:
 
     def __init__(
         self,
-        model_path: Optional[Union[str, Path]] = None,
-        model: Optional[Any] = None,
-        config: Optional[Union[EngineConfig, str, Path]] = None,
+        model_path: str | Path | None = None,
+        model: Any | None = None,
+        config: EngineConfig | str | Path | None = None,
         device: str = "auto",
     ) -> None:
         if isinstance(config, (str, Path)):
@@ -219,12 +221,12 @@ class AutoCFUEngine:
 
     def infer_image(
         self,
-        image_input: Union[str, Path, Image.Image, np.ndarray],
+        image_input: str | Path | Image.Image | np.ndarray,
         return_raw: bool = False,
     ) -> InferenceResult:
         """Run sliced inference on a single full-resolution plate."""
         start_time = time.perf_counter()
-        image_path: Optional[str] = None
+        image_path: str | None = None
 
         if isinstance(image_input, (str, Path)):
             image_path = str(image_input)
@@ -240,7 +242,7 @@ class AutoCFUEngine:
 
         # Generate tiles and their absolute slice window offsets
         slices = self.slicer.slice_image(pil_img)
-        raw_detections: List[Detection] = []
+        raw_detections: list[Detection] = []
 
         for window, crop in slices:
             slice_dets = self.model.predict_slice(
@@ -281,16 +283,16 @@ class AutoCFUEngine:
 
     def infer_batch(
         self,
-        image_paths: Sequence[Union[str, Path]],
-    ) -> List[InferenceResult]:
+        image_paths: Sequence[str | Path],
+    ) -> list[InferenceResult]:
         """Run inference across a list of image paths."""
-        results: List[InferenceResult] = []
+        results: list[InferenceResult] = []
         for path in image_paths:
             results.append(self.infer_image(path))
         return results
 
 
-def export_batch_summary_csv(results: List[InferenceResult], output_csv_path: Union[str, Path]) -> None:
+def export_batch_summary_csv(results: list[InferenceResult], output_csv_path: str | Path) -> None:
     """Save batch inference summary counts to a single CSV file."""
     target = Path(output_csv_path)
     target.parent.mkdir(parents=True, exist_ok=True)

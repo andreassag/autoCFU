@@ -1,6 +1,6 @@
 # Models Directory
 
-This directory is the designated local storage path for trained model weights and exported ONNX runtime artifacts used by the inference engine (`inference/`).
+This directory is the designated local storage path for trained model weights and exported ONNX runtime artifacts used by the inference engine (`src/autocfu/`).
 
 > [!NOTE]
 > Large weight files (`*.onnx`, `*.pth`, `*.pt`, `*.bin`) are excluded from version control via `.gitignore`.

@@ -1,18 +1,22 @@
 """Unit tests for RTDetrV2ONNXModel session wrapper and provider resolution."""
 
+from __future__ import annotations
+
 import unittest
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Sequence
 
 import numpy as np
 from PIL import Image
 
-try:
-    import onnxruntime as ort
-except ImportError:
-    ort = None
-
 from autocfu.model import RTDetrV2ONNXModel
+
+try:
+    import onnxruntime as _ort
+except ImportError:
+    _ort = None
+
+ort: Any = _ort
 
 
 class MockNode:
@@ -25,13 +29,13 @@ class MockSession:
 
     def __init__(
         self,
-        input_names: List[str] = ("images", "orig_target_sizes"),
-        output_names: List[str] = ("labels", "boxes", "scores"),
-        outputs: Optional[List[np.ndarray]] = None,
+        input_names: Sequence[str] = ("images", "orig_target_sizes"),
+        output_names: Sequence[str] = ("labels", "boxes", "scores"),
+        outputs: list[np.ndarray] | None = None,
     ) -> None:
         self.input_nodes = [MockNode(n) for n in input_names]
         self.output_nodes = [MockNode(n) for n in output_names]
-        self.last_feed_dict: Dict[str, Any] = {}
+        self.last_feed_dict: dict[str, Any] = {}
 
         if outputs is not None:
             self.outputs = outputs
@@ -42,16 +46,16 @@ class MockSession:
             scores = np.array([[0.92, 0.45]], dtype=np.float32)
             self.outputs = [labels, boxes, scores]
 
-    def get_inputs(self) -> List[MockNode]:
+    def get_inputs(self) -> list[MockNode]:
         return self.input_nodes
 
-    def get_outputs(self) -> List[MockNode]:
+    def get_outputs(self) -> list[MockNode]:
         return self.output_nodes
 
-    def get_providers(self) -> List[str]:
+    def get_providers(self) -> list[str]:
         return ["CPUExecutionProvider"]
 
-    def run(self, output_names: Any, feed_dict: Dict[str, Any]) -> List[np.ndarray]:
+    def run(self, output_names: Any, feed_dict: dict[str, Any]) -> list[np.ndarray]:
         self.last_feed_dict = feed_dict
         return self.outputs
 
@@ -69,6 +73,7 @@ class TestRTDetrV2ONNXModel(unittest.TestCase):
 
     @unittest.skipIf(ort is None, "onnxruntime is not installed")
     def test_device_resolution(self) -> None:
+        assert ort is not None
         cpu_prov = RTDetrV2ONNXModel._resolve_providers("cpu")
         self.assertEqual(cpu_prov, ["CPUExecutionProvider"])
 
@@ -156,6 +161,8 @@ class TestRTDetrV2ONNXModel(unittest.TestCase):
     @unittest.skipIf(ort is None, "onnxruntime is not installed")
     def test_real_onnx_model_loading(self) -> None:
         """Test loading a real physical ONNX model file from disk."""
+        assert ort is not None
+        assert ort.__file__ is not None
         bundled_onnx = Path(ort.__file__).parent / "datasets" / "mul_1.onnx"
         if bundled_onnx.is_file():
             model = RTDetrV2ONNXModel(model_path=bundled_onnx, device="cpu")

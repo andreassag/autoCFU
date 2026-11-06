@@ -1,8 +1,10 @@
 """Configuration dataclasses and YAML loading utilities for AutoCFU."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import yaml
 
@@ -48,7 +50,7 @@ class EngineConfig:
     slicing: SlicingConfig = field(default_factory=SlicingConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert configuration to a dictionary."""
         return {
             "slicing": {
@@ -67,7 +69,7 @@ class EngineConfig:
             },
         }
 
-    def save_yaml(self, path: Union[str, Path]) -> None:
+    def save_yaml(self, path: str | Path) -> None:
         """Serialize configuration to a YAML file."""
         target_path = Path(path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +77,7 @@ class EngineConfig:
             yaml.safe_dump(self.to_dict(), f, default_flow_style=False)
 
 
-def load_config(config_source: Optional[Union[str, Path, Dict[str, Any]]] = None) -> EngineConfig:
+def load_config(config_source: str | Path | dict[str, Any] | None = None) -> EngineConfig:
     """Load EngineConfig from a YAML file path or dictionary.
 
     If config_source is None, default settings are returned.
@@ -83,7 +85,7 @@ def load_config(config_source: Optional[Union[str, Path, Dict[str, Any]]] = None
     if config_source is None:
         return EngineConfig()
 
-    data: Dict[str, Any]
+    data: dict[str, Any]
     if isinstance(config_source, (str, Path)):
         path = Path(config_source)
         if not path.is_file():

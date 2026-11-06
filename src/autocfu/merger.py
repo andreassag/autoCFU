@@ -1,15 +1,17 @@
 """Bounding box clustering and post-processing mergers (GreedyNMM and NMS)."""
 
+from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Sequence
 
 
 @dataclass
 class Detection:
     """Represents a single object detection in absolute coordinates."""
 
-    bbox: Tuple[float, float, float, float]  # (x1, y1, x2, y2)
+    bbox: tuple[float, float, float, float]  # (x1, y1, x2, y2)
     score: float
     class_id: int = 0
     label: str = "colony"
@@ -49,7 +51,7 @@ class Detection:
         return (self.y1 + self.y2) / 2.0
 
     @property
-    def center(self) -> Tuple[float, float]:
+    def center(self) -> tuple[float, float]:
         """(cx, cy) tuple representing the colony centroid."""
         return (self.cx, self.cy)
 
@@ -62,7 +64,7 @@ class Detection:
     def area(self) -> float:
         return self.width * self.height
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "bbox": [round(float(c), 2) for c in self.bbox],
             "center": [round(float(self.cx), 2), round(float(self.cy), 2)],
@@ -142,7 +144,7 @@ class GreedyNMM:
             raise ValueError(f"Unknown match_metric: {match_metric}. Supported: 'iou', 'ios'.")
         self._metric_fn = calculate_ios if self.match_metric == "ios" else calculate_iou
 
-    def merge(self, detections: List[Detection]) -> List[Detection]:
+    def merge(self, detections: list[Detection]) -> list[Detection]:
         """Merge overlapping detections into consolidated detections."""
         if not detections:
             return []
@@ -151,11 +153,11 @@ class GreedyNMM:
             return self._merge_class_group(detections)
 
         # Group by class_id
-        grouped: Dict[int, List[Detection]] = defaultdict(list)
+        grouped: dict[int, list[Detection]] = defaultdict(list)
         for det in detections:
             grouped[det.class_id].append(det)
 
-        merged_results: List[Detection] = []
+        merged_results: list[Detection] = []
         for class_id, class_dets in grouped.items():
             merged_results.extend(self._merge_class_group(class_dets))
 
@@ -163,15 +165,15 @@ class GreedyNMM:
         merged_results.sort(key=lambda d: d.score, reverse=True)
         return merged_results
 
-    def _merge_class_group(self, detections: List[Detection]) -> List[Detection]:
+    def _merge_class_group(self, detections: list[Detection]) -> list[Detection]:
         # Sort descending by score
         candidates = sorted(detections, key=lambda d: d.score, reverse=True)
-        merged: List[Detection] = []
+        merged: list[Detection] = []
 
         while candidates:
             best = candidates.pop(0)
             cluster = [best]
-            remaining: List[Detection] = []
+            remaining: list[Detection] = []
 
             for det in candidates:
                 match_val = self._metric_fn(best.bbox, det.bbox)
@@ -232,7 +234,7 @@ class NMS:
             raise ValueError(f"Unknown match_metric: {match_metric}. Supported: 'iou', 'ios'.")
         self._metric_fn = calculate_ios if self.match_metric == "ios" else calculate_iou
 
-    def merge(self, detections: List[Detection]) -> List[Detection]:
+    def merge(self, detections: list[Detection]) -> list[Detection]:
         """Apply standard NMS suppression."""
         if not detections:
             return []
@@ -240,20 +242,20 @@ class NMS:
         if self.class_agnostic:
             return self._suppress_group(detections)
 
-        grouped: Dict[int, List[Detection]] = defaultdict(list)
+        grouped: dict[int, list[Detection]] = defaultdict(list)
         for det in detections:
             grouped[det.class_id].append(det)
 
-        survivors: List[Detection] = []
+        survivors: list[Detection] = []
         for class_id, class_dets in grouped.items():
             survivors.extend(self._suppress_group(class_dets))
 
         survivors.sort(key=lambda d: d.score, reverse=True)
         return survivors
 
-    def _suppress_group(self, detections: List[Detection]) -> List[Detection]:
+    def _suppress_group(self, detections: list[Detection]) -> list[Detection]:
         candidates = sorted(detections, key=lambda d: d.score, reverse=True)
-        kept: List[Detection] = []
+        kept: list[Detection] = []
 
         while candidates:
             best = candidates.pop(0)
@@ -267,7 +269,7 @@ def get_merger(
     merger_type: str = "greedy_nmm",
     iou_threshold: float = 0.50,
     match_metric: str = "iou",
-) -> Union[GreedyNMM, NMS]:
+) -> GreedyNMM | NMS:
     """Factory creating the specified post-processing merger."""
     m_type = merger_type.strip().lower()
     if m_type in ("greedy_nmm", "greedynmm", "nmm"):

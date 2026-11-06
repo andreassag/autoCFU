@@ -1,5 +1,7 @@
 """Unit tests for autocfu CLI argument parsing, configuration loading, and execution."""
 
+from __future__ import annotations
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,6 +65,7 @@ class TestCLI(unittest.TestCase):
     def test_find_default_config(self) -> None:
         cfg_path = find_default_config()
         self.assertIsNotNone(cfg_path)
+        assert cfg_path is not None
         self.assertTrue(Path(cfg_path).is_file())
         self.assertTrue(cfg_path.endswith("default_inference.yaml"))
 

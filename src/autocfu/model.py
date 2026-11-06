@@ -1,17 +1,21 @@
 """ONNX Runtime session wrapper for RT-DETRv2 colony detection models."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Sequence
 
 import numpy as np
 from PIL import Image
 
-try:
-    import onnxruntime as ort
-except ImportError:
-    ort = None
-
 from .merger import Detection
+
+try:
+    import onnxruntime as _ort
+except ImportError:
+    _ort = None
+
+ort: Any = _ort
 
 
 def _safe_unbatch(arr: np.ndarray, target_min_dim: int) -> np.ndarray:
@@ -23,8 +27,8 @@ def _safe_unbatch(arr: np.ndarray, target_min_dim: int) -> np.ndarray:
 
 
 def _find_output_tensor(
-    output_dict: Dict[str, Any],
-    raw_outputs: List[Any],
+    output_dict: dict[str, Any],
+    raw_outputs: list[Any],
     candidates: Sequence[str],
     fallback_index: int,
 ) -> np.ndarray:
@@ -42,10 +46,10 @@ class RTDetrV2ONNXModel:
 
     def __init__(
         self,
-        model_path: Optional[Union[str, Path]] = None,
+        model_path: str | Path | None = None,
         device: str = "auto",
         input_size: int = 640,
-        session: Optional[Any] = None,
+        session: Any | None = None,
     ) -> None:
         if ort is None and session is None:
             raise ImportError("onnxruntime is required for model inference. Install it via `pip install onnxruntime`.")
@@ -60,6 +64,10 @@ class RTDetrV2ONNXModel:
                 self.session.get_providers()[0] if hasattr(self.session, "get_providers") else "Custom"
             )
         elif model_path is not None:
+            if ort is None:
+                raise ImportError(
+                    "onnxruntime is required for model inference. Install it via `pip install onnxruntime`."
+                )
             self.model_path = Path(model_path)
             if not self.model_path.is_file():
                 raise FileNotFoundError(f"ONNX model file not found at: {self.model_path}")
@@ -90,7 +98,7 @@ class RTDetrV2ONNXModel:
         self._output_names = [out.name for out in self.session.get_outputs()]
 
     @staticmethod
-    def _resolve_providers(device: str) -> List[str]:
+    def _resolve_providers(device: str) -> list[str]:
         available = ort.get_available_providers() if hasattr(ort, "get_available_providers") else []
         if device == "cuda":
             if "CUDAExecutionProvider" not in available:
@@ -105,11 +113,11 @@ class RTDetrV2ONNXModel:
 
     def predict_slice(
         self,
-        crop: Union[np.ndarray, Image.Image],
+        crop: np.ndarray | Image.Image,
         confidence_threshold: float = 0.35,
-        target_class_id: Optional[int] = 0,
+        target_class_id: int | None = 0,
         class_name: str = "colony",
-    ) -> List[Detection]:
+    ) -> list[Detection]:
         """Perform object detection on an individual image tile/slice.
 
         Args:
@@ -142,7 +150,7 @@ class RTDetrV2ONNXModel:
         blob = np.transpose(img_np, (2, 0, 1))[None, ...]
 
         # Prepare model inputs
-        feed_dict: Dict[str, Any] = {}
+        feed_dict: dict[str, Any] = {}
         if "images" in self._input_names:
             feed_dict["images"] = blob
         else:
@@ -168,7 +176,7 @@ class RTDetrV2ONNXModel:
         scale_x = (orig_w / self.input_size) if (not has_orig_sizes and orig_w != self.input_size) else 1.0
         scale_y = (orig_h / self.input_size) if (not has_orig_sizes and orig_h != self.input_size) else 1.0
 
-        detections: List[Detection] = []
+        detections: list[Detection] = []
         for label, box, score in zip(labels, boxes, scores):
             score_val = float(score)
             label_val = int(label)

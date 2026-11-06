@@ -1,7 +1,8 @@
 """Deterministic 2D grid image slicer for high-resolution colony plates."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Tuple, Union
 
 import numpy as np
 from PIL import Image
@@ -27,7 +28,7 @@ class SliceWindow:
         return self.ymax - self.ymin
 
     @property
-    def bbox(self) -> Tuple[int, int, int, int]:
+    def bbox(self) -> tuple[int, int, int, int]:
         return (self.xmin, self.ymin, self.xmax, self.ymax)
 
 
@@ -55,7 +56,7 @@ class PlateSlicer:
         self.step_y = max(1, int(slice_height * (1.0 - overlap_height_ratio)))
 
     @classmethod
-    def from_config(cls, config: SlicingConfig) -> "PlateSlicer":
+    def from_config(cls, config: SlicingConfig) -> PlateSlicer:
         return cls(
             slice_width=config.slice_width,
             slice_height=config.slice_height,
@@ -63,12 +64,12 @@ class PlateSlicer:
             overlap_height_ratio=config.overlap_height_ratio,
         )
 
-    def _generate_1d_intervals(self, full_length: int, slice_len: int, step: int) -> List[Tuple[int, int]]:
+    def _generate_1d_intervals(self, full_length: int, slice_len: int, step: int) -> list[tuple[int, int]]:
         """Compute start and end coordinates along one dimension."""
         if full_length <= slice_len:
             return [(0, full_length)]
 
-        intervals: List[Tuple[int, int]] = []
+        intervals: list[tuple[int, int]] = []
         start = 0
         while start + slice_len <= full_length:
             intervals.append((start, start + slice_len))
@@ -81,7 +82,7 @@ class PlateSlicer:
 
         return intervals
 
-    def get_slice_windows(self, image_width: int, image_height: int) -> List[SliceWindow]:
+    def get_slice_windows(self, image_width: int, image_height: int) -> list[SliceWindow]:
         """Compute all 2D slice windows covering the given image dimensions."""
         if image_width <= 0 or image_height <= 0:
             raise ValueError("Image dimensions must be positive.")
@@ -89,7 +90,7 @@ class PlateSlicer:
         x_intervals = self._generate_1d_intervals(image_width, self.slice_width, self.step_x)
         y_intervals = self._generate_1d_intervals(image_height, self.slice_height, self.step_y)
 
-        windows: List[SliceWindow] = []
+        windows: list[SliceWindow] = []
         for ymin, ymax in y_intervals:
             for xmin, xmax in x_intervals:
                 windows.append(SliceWindow(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax))
@@ -97,8 +98,8 @@ class PlateSlicer:
 
     def slice_image(
         self,
-        image: Union[np.ndarray, Image.Image],
-    ) -> List[Tuple[SliceWindow, np.ndarray]]:
+        image: np.ndarray | Image.Image,
+    ) -> list[tuple[SliceWindow, np.ndarray]]:
         """Slice an image into cropped numpy array tiles with their slice coordinates.
 
         Returns:
@@ -114,7 +115,7 @@ class PlateSlicer:
             raise TypeError(f"Unsupported image type: {type(image)}. Expected PIL Image or numpy array.")
 
         windows = self.get_slice_windows(width, height)
-        results: List[Tuple[SliceWindow, np.ndarray]] = []
+        results: list[tuple[SliceWindow, np.ndarray]] = []
         for w in windows:
             crop = img_np[w.ymin : w.ymax, w.xmin : w.xmax]
             results.append((w, crop))

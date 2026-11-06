@@ -1,6 +1,6 @@
 # AutoCFU: High-Resolution Microbial Colony Detection & Counting
 
-An automated, high-resolution colony detection and enumeration system for microbiological Petri dishes using **RT-DETRv2** and **Slicing-Aided Hyper Inference (SAHI / GreedyNMM)**.
+An automated, high-resolution colony detection and enumeration system for microbiological Petri dishes using **RT-DETRv2 / RT-DETRv4** and **Slicing-Aided Hyper Inference (SAHI / GreedyNMM)**.
 
 ---
 
@@ -9,24 +9,28 @@ An automated, high-resolution colony detection and enumeration system for microb
 Full-dish agar photography typically captures Petri dishes at 4000×4000 resolution. Direct downscaling reduces minute colonies (<15 pixels) to unrecognizable noise. This repository hosts the decoupled, production-grade Python inference engine and CLI. Dataset preparation, fine-tuning, and benchmarking are hosted in the companion repository [autoCFU-training](https://github.com/andreassag/autoCFU-training).
 
 ```
-autocfu/
-├── inference/                   # Standalone Python Inference Engine
-│   ├── pyproject.toml           # Package definition (autocfu, autocfu CLI)
-│   ├── README.md                # Engine documentation and API references
-│   ├── autocfu/
-│   │   ├── __init__.py          # Public exports
-│   │   ├── config.py            # Dataclass schemas and YAML loader
-│   │   ├── slicer.py            # 2D Grid Window Tiler (step = size * (1 - overlap))
-│   │   ├── merger.py            # Greedy Non-Maximum Merging (GreedyNMM & NMS)
-│   │   ├── model.py             # ONNX Runtime session manager (CUDA & CPU)
-│   │   ├── pipeline.py          # Full-plate end-to-end sliced inference orchestrator
-│   │   └── cli.py               # autocfu CLI entrypoint
-│   └── tests/
-│       ├── test_slicer.py       # Slicer grid offsets & boundary tests
-│       ├── test_merger.py       # IoU and weighted coordinate clustering tests
-│       ├── test_model.py        # ONNX session unbatching & provider tests
-│       ├── test_pipeline.py     # Pipeline mock runner & serialization tests
-│       └── test_cli.py          # CLI argument parsing & execution tests
+autoCFU/
+├── .github/
+│   ├── dependabot.yml           # Automated weekly dependency updates (pip & GitHub Actions)
+│   └── workflows/
+│       ├── ci.yml               # Multi-version CI matrix (Python 3.10, 3.11, 3.12)
+│       └── dependabot-auto-merge.yml
+│
+├── src/autocfu/                 # Standalone Python Inference Engine
+│   ├── __init__.py              # Public exports
+│   ├── config.py                # Dataclass schemas and YAML loader
+│   ├── slicer.py                # 2D Grid Window Tiler (step = size * (1 - overlap))
+│   ├── merger.py                # Greedy Non-Maximum Merging (GreedyNMM & NMS)
+│   ├── model.py                 # ONNX Runtime session manager (CUDA & CPU)
+│   ├── pipeline.py              # Full-plate end-to-end sliced inference orchestrator
+│   └── cli.py                   # autocfu CLI entrypoint
+│
+├── tests/                       # Unit Test Suite
+│   ├── test_slicer.py           # Slicer grid offsets & boundary tests
+│   ├── test_merger.py           # IoU and weighted coordinate clustering tests
+│   ├── test_model.py            # ONNX session unbatching & provider tests
+│   ├── test_pipeline.py         # Pipeline mock runner & serialization tests
+│   └── test_cli.py              # CLI argument parsing & execution tests
 │
 ├── configs/
 │   └── default_inference.yaml   # Default slicing (640×640, 20% overlap) & GreedyNMM thresholds
@@ -39,10 +43,11 @@ autocfu/
 │   ├── LICENSE-RT-DETRv2.txt    # RT-DETRv2 Apache-2.0 License
 │   ├── LICENSE-AGAR-DATASET.txt # AGAR Dataset CC BY-NC 2.0 License
 │   └── LICENSE-SAHI.txt         # SAHI MIT License
-├── Makefile                     # Developer automation (install, test, lint, hooks)
-├── .pre-commit-config.yaml      # Git hygiene hooks
-├── .github/                     # GitHub Actions CI and Dependabot workflows
 ├── scripts/                     # Developer utility scripts (dependency upgrades)
+│   └── update_dependencies.sh
+├── Makefile                     # Developer automation (install, test, lint, typecheck, hooks)
+├── pyproject.toml               # Package build specifications (uv_build, ruff, ty)
+├── .pre-commit-config.yaml      # Git hygiene hooks
 ├── .gitignore                   # Excludes weights, checkpoints, caches, and datasets
 ├── .gitattributes               # LF line ending normalization & binary definitions
 ├── AGENTS.md                    # Developer standards and agent guidelines
@@ -64,13 +69,19 @@ make install
 
 *(Note: Automatically uses `uv` if present on your system, falling back to standard `python3 -m venv` and `pip`.)*
 
-### 2. Run Tests & Lints
+### 2. Run Tests, Lints & Type Checks
 ```bash
 # Run unit tests
 make test
 
-# Run linter
+# Run linter and static type checker (ruff & ty)
 make lint
+
+# Run static type checker (ty)
+make typecheck
+
+# Format Python code (ruff)
+make format
 
 # Run pre-commit checks across all files
 make pre-commit
@@ -105,6 +116,23 @@ autocfu --input-dir path/to/plates/ \
 
 *(Note: `autocfu-infer` and `agar-infer` are also available as command aliases).*
 
+### CLI Options
+- `--image`: Path to single plate image file.
+- `--input-dir`: Directory containing images to process.
+- `--model`: Path to exported RT-DETR ONNX model.
+- `--config`: Path to YAML configuration (default: `configs/default_inference.yaml` if present).
+- `--confidence`: Detection score threshold (overrides config, default `0.35`).
+- `--overlap`: Overlap ratio between adjacent tiles (overrides config, default `0.20`).
+- `--slice-size`: Slice window width and height (overrides config, default `640`).
+- `--output-dir`: Destination directory for outputs (default: `results`).
+- `--save-overlay`: Render and save bounding box overlays on output images.
+- `--save-csv`: Export a summary CSV with image filenames, counts, and runtimes.
+- `--save-json`: Export structured JSON bounding box coordinates for each plate.
+- `--merger`: Post-processing merger algorithm (`greedy_nmm` or `nms`).
+- `--match-metric`: Bounding box metric (`iou` or `ios`).
+- `--match-threshold`: Intersection threshold for merging boxes (default: `0.50`).
+- `--device`: Execution device: `auto`, `cuda`, or `cpu`.
+
 ### Python API
 
 ```python
@@ -136,10 +164,9 @@ result.draw_overlay(output_path="results/plate_annotated.jpg")
 Model training, dataset preparation, and evaluation pipelines are maintained in the companion repository:
 - **Repository**: [autoCFU-training](https://github.com/andreassag/autoCFU-training)
 - **Features**:
-  - Google Colab notebooks for AGAR dataset streaming, 640×640 COCO tiling, and RT-DETRv2 fine-tuning.
-  - Anticipated pure-Python training and benchmarking pipeline with PyTorch TensorBoard dashboard integration.
+  - Google Colab notebooks for AGAR dataset streaming, 640×640 COCO tiling, and RT-DETRv4 / RT-DETRv2 fine-tuning.
+  - Pure-Python training and benchmarking pipeline with PyTorch TensorBoard dashboard integration.
   - ONNX export scripts to generate models for this inference engine.
-
 
 ---
 

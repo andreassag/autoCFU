@@ -1,5 +1,7 @@
 """AutoCFU: High-resolution sliced microbial colony detection engine."""
 
+from __future__ import annotations
+
 from .config import EngineConfig, InferenceConfig, SlicingConfig, load_config
 from .merger import NMS, Detection, GreedyNMM, calculate_ios, calculate_iou, get_merger
 from .model import RTDetrV2ONNXModel

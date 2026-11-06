@@ -1,4 +1,4 @@
-.PHONY: help install pre-commit test lint format clean act update-deps
+.PHONY: help install pre-commit test lint typecheck format clean act update-deps
 
 VENV ?= .venv
 PYTHON ?= $(VENV)/bin/python
@@ -6,13 +6,15 @@ UV ?= uv
 PRECOMMIT ?= $(VENV)/bin/pre-commit
 PYTEST ?= $(VENV)/bin/pytest
 RUFF ?= $(VENV)/bin/ruff
+TY ?= $(VENV)/bin/ty
 
 help:
 	@echo "Available commands:"
 	@echo "  make install         - Create virtualenv, install dependencies, and setup pre-commit"
 	@echo "  make pre-commit      - Run pre-commit checks on all files"
 	@echo "  make test            - Run unit tests on the inference engine"
-	@echo "  make lint            - Run linter checks (ruff)"
+	@echo "  make lint            - Run linter and type checks (ruff, ty)"
+	@echo "  make typecheck       - Run static type checker (ty)"
 	@echo "  make format          - Format python code (ruff)"
 	@echo "  make clean           - Remove build, cache, and test artifacts"
 	@echo "  make act             - Run GitHub Actions CI locally using act"
@@ -22,12 +24,12 @@ install:
 	@if command -v $(UV) >/dev/null 2>&1; then \
 		echo "Creating virtual environment and installing with $(UV)..."; \
 		$(UV) venv --allow-existing $(VENV) --python 3.12 2>/dev/null || $(UV) venv --allow-existing $(VENV); \
-		$(UV) pip install --python $(PYTHON) -e "./inference[dev]"; \
+		$(UV) pip install --python $(PYTHON) -e ".[dev]"; \
 	else \
 		echo "Creating virtual environment with python3..."; \
 		python3 -m venv $(VENV); \
 		$(PYTHON) -m pip install --upgrade pip; \
-		$(PYTHON) -m pip install -e "./inference[dev]"; \
+		$(PYTHON) -m pip install -e ".[dev]"; \
 	fi
 	@echo "Installing pre-commit git hooks..."
 	@if [ -f $(PRECOMMIT) ]; then \
@@ -46,32 +48,48 @@ pre-commit:
 	fi
 
 test:
-	@if [ -f $(PYTEST) ]; then \
-		$(PYTEST) inference/tests; \
+	@if [ -x $(PYTHON) ] && [ -f $(PYTEST) ]; then \
+		$(PYTEST) tests; \
 	else \
-		PYTHONPATH=inference python3 -m unittest discover -s inference/tests; \
+		PYTHONPATH=src python3 -m unittest discover -s tests; \
 	fi
 
 lint:
 	@if [ -f $(RUFF) ]; then \
-		$(RUFF) check inference/; \
+		$(RUFF) check src/ tests/; \
 	elif command -v ruff >/dev/null 2>&1; then \
-		ruff check inference/; \
+		ruff check src/ tests/; \
 	else \
 		echo "ruff not found. Run 'make install' first."; exit 1; \
+	fi
+	@if [ -f $(TY) ]; then \
+		$(TY) check src/ tests/; \
+	elif command -v ty >/dev/null 2>&1; then \
+		ty check src/ tests/; \
+	else \
+		echo "ty not found. Run 'make install' first."; exit 1; \
+	fi
+
+typecheck:
+	@if [ -f $(TY) ]; then \
+		$(TY) check src/ tests/; \
+	elif command -v ty >/dev/null 2>&1; then \
+		ty check src/ tests/; \
+	else \
+		echo "ty not found. Run 'make install' first."; exit 1; \
 	fi
 
 format:
 	@if [ -f $(RUFF) ]; then \
-		$(RUFF) format inference/; \
+		$(RUFF) format src/ tests/; \
 	elif command -v ruff >/dev/null 2>&1; then \
-		ruff format inference/; \
+		ruff format src/ tests/; \
 	else \
 		echo "ruff not found. Run 'make install' first."; exit 1; \
 	fi
 
 clean:
-	@rm -rf build/ dist/ *.egg-info inference/*.egg-info .pytest_cache .ruff_cache inference/.pytest_cache inference/.ruff_cache
+	@rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .ruff_cache
 	@find . -type d -name "__pycache__" -exec rm -rf {} +
 
 act:

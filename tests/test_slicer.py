@@ -1,5 +1,7 @@
 """Unit tests for PlateSlicer and SliceWindow."""
 
+from __future__ import annotations
+
 import unittest
 
 import numpy as np
@@ -101,14 +103,14 @@ class TestPlateSlicer(unittest.TestCase):
         # Slice numpy array
         np_slices = slicer.slice_image(np_img)
         self.assertGreater(len(np_slices), 0)
-        for win, crop in np_slices:
+        for _win, crop in np_slices:
             self.assertEqual(crop.shape, (100, 100, 3))
 
         # Slice PIL image
         pil_img = Image.fromarray(np_img)
         pil_slices = slicer.slice_image(pil_img)
         self.assertEqual(len(np_slices), len(pil_slices))
-        for win, crop in pil_slices:
+        for _win, crop in pil_slices:
             self.assertEqual(crop.shape, (100, 100, 3))
 
     def test_from_config(self) -> None:
