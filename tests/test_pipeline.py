@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import tests  # noqa: F401  # isort: skip
+
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -180,6 +183,36 @@ class TestPipeline(unittest.TestCase):
 
         res_without_raw = engine.infer_image(img, return_raw=False)
         self.assertIsNone(res_without_raw.raw_detections)
+
+    def test_pipeline_intra_tile_nms_forwarding(self) -> None:
+        passed_kwargs: dict[str, Any] = {}
+
+        class IntraTileModel:
+            def predict_slice(
+                self,
+                crop: Any,
+                confidence_threshold: float = 0.35,
+                target_class_id: int | None = 0,
+                class_name: str = "colony",
+                intra_tile_nms_threshold: float = 0.0,
+                intra_tile_match_metric: str = "ios",
+            ) -> list[Detection]:
+                passed_kwargs["intra_tile_nms_threshold"] = intra_tile_nms_threshold
+                passed_kwargs["intra_tile_match_metric"] = intra_tile_match_metric
+                return [Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.9, class_id=0, label="colony")]
+
+        cfg = EngineConfig()
+        cfg.inference.intra_tile_nms_threshold = 0.45
+        cfg.inference.intra_tile_match_metric = "ios"
+        cfg.slicing.slice_width = 200
+        cfg.slicing.slice_height = 200
+
+        engine = AutoCFUEngine(model=IntraTileModel(), config=cfg)
+        img = Image.new("RGB", (200, 200))
+        res = engine.infer_image(img)
+        self.assertEqual(res.colony_count, 1)
+        self.assertEqual(passed_kwargs.get("intra_tile_nms_threshold"), 0.45)
+        self.assertEqual(passed_kwargs.get("intra_tile_match_metric"), "ios")
 
 
 if __name__ == "__main__":

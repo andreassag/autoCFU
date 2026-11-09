@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tests  # noqa: F401  # isort: skip
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,6 +38,10 @@ class TestCLI(unittest.TestCase):
                 "ios",
                 "--match-threshold",
                 "0.60",
+                "--intra-tile-threshold",
+                "0.40",
+                "--intra-tile-metric",
+                "ios",
                 "--device",
                 "cpu",
                 "--save-overlay",
@@ -51,6 +57,8 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(args.merger, "nms")
         self.assertEqual(args.match_metric, "ios")
         self.assertAlmostEqual(args.match_threshold, 0.60)
+        self.assertAlmostEqual(args.intra_tile_threshold, 0.40)
+        self.assertEqual(args.intra_tile_metric, "ios")
         self.assertEqual(args.device, "cpu")
         self.assertTrue(args.save_overlay)
         self.assertTrue(args.save_json)

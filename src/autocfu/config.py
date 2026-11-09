@@ -38,7 +38,9 @@ class InferenceConfig:
     confidence_threshold: float = 0.35
     postprocess_match_threshold: float = 0.50
     merger_type: str = "greedy_nmm"  # Options: 'greedy_nmm', 'nms'
-    match_metric: str = "iou"  # Options: 'iou', 'ios'
+    match_metric: str = "ios"  # Options: 'iou', 'ios'
+    intra_tile_nms_threshold: float = 0.45
+    intra_tile_match_metric: str = "ios"  # Options: 'iou', 'ios'
     target_class_id: int = 0
     class_name: str = "colony"
 
@@ -64,6 +66,8 @@ class EngineConfig:
                 "postprocess_match_threshold": self.inference.postprocess_match_threshold,
                 "merger_type": self.inference.merger_type,
                 "match_metric": self.inference.match_metric,
+                "intra_tile_nms_threshold": self.inference.intra_tile_nms_threshold,
+                "intra_tile_match_metric": self.inference.intra_tile_match_metric,
                 "target_class_id": self.inference.target_class_id,
                 "class_name": self.inference.class_name,
             },
@@ -111,7 +115,9 @@ def load_config(config_source: str | Path | dict[str, Any] | None = None) -> Eng
         confidence_threshold=float(inference_data.get("confidence_threshold", 0.35)),
         postprocess_match_threshold=float(inference_data.get("postprocess_match_threshold", 0.50)),
         merger_type=str(inference_data.get("merger_type", "greedy_nmm")),
-        match_metric=str(inference_data.get("match_metric", "iou")),
+        match_metric=str(inference_data.get("match_metric", "ios")),
+        intra_tile_nms_threshold=float(inference_data.get("intra_tile_nms_threshold", 0.45)),
+        intra_tile_match_metric=str(inference_data.get("intra_tile_match_metric", "ios")),
         target_class_id=int(inference_data.get("target_class_id", 0)),
         class_name=str(inference_data.get("class_name", "colony")),
     )

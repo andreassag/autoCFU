@@ -13,6 +13,8 @@ inference:
   confidence_threshold: 0.35
   postprocess_match_threshold: 0.50
   merger_type: "greedy_nmm" # Options: "greedy_nmm", "nms"
-  match_metric: "iou" # Options: "iou", "ios"
+  match_metric: "ios" # Options: "iou", "ios"
+  intra_tile_nms_threshold: 0.45 # Intra-tile query duplicate suppression (0.0 disables)
+  intra_tile_match_metric: "ios" # Metric for intra-tile suppression: "iou" or "ios"
   target_class_id: 0
   class_name: "colony"

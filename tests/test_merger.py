@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tests  # noqa: F401  # isort: skip
+
 import unittest
 
 from autocfu.merger import NMS, Detection, GreedyNMM, calculate_ios, calculate_iou, get_merger

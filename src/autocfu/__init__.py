@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .config import EngineConfig, InferenceConfig, SlicingConfig, load_config
 from .merger import NMS, Detection, GreedyNMM, calculate_ios, calculate_iou, get_merger
-from .model import RTDetrV2ONNXModel
+from .model import RTDetrONNXModel, RTDetrV2ONNXModel, RTDetrV4ONNXModel
 from .pipeline import AgarInferenceEngine, AutoCFUEngine, InferenceResult, export_batch_summary_csv
 from .slicer import PlateSlicer, SliceWindow
 
@@ -23,6 +23,8 @@ __all__ = [
     "calculate_ios",
     "get_merger",
     "RTDetrV2ONNXModel",
+    "RTDetrONNXModel",
+    "RTDetrV4ONNXModel",
     "EngineConfig",
     "SlicingConfig",
     "InferenceConfig",

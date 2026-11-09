@@ -117,6 +117,8 @@ class RTDetrV2ONNXModel:
         confidence_threshold: float = 0.35,
         target_class_id: int | None = 0,
         class_name: str = "colony",
+        intra_tile_nms_threshold: float = 0.0,
+        intra_tile_match_metric: str = "ios",
     ) -> list[Detection]:
         """Perform object detection on an individual image tile/slice.
 
@@ -125,6 +127,8 @@ class RTDetrV2ONNXModel:
             confidence_threshold: Minimum prediction score.
             target_class_id: If specified, filter detections to this class ID.
             class_name: Human-readable label name for detected objects.
+            intra_tile_nms_threshold: Metric threshold for intra-tile duplicate query suppression (0.0 disables).
+            intra_tile_match_metric: Overlap metric for intra-tile suppression ('iou' or 'ios').
 
         Returns:
             List of Detection objects in coordinates relative to the slice [0, crop_w/h].
@@ -187,10 +191,14 @@ class RTDetrV2ONNXModel:
             if target_class_id is not None and label_val != target_class_id:
                 continue
 
-            bx1 = float(box[0]) * scale_x
-            by1 = float(box[1]) * scale_y
-            bx2 = float(box[2]) * scale_x
-            by2 = float(box[3]) * scale_y
+            bx1 = max(0.0, min(float(orig_w), float(box[0]) * scale_x))
+            by1 = max(0.0, min(float(orig_h), float(box[1]) * scale_y))
+            bx2 = max(0.0, min(float(orig_w), float(box[2]) * scale_x))
+            by2 = max(0.0, min(float(orig_h), float(box[3]) * scale_y))
+
+            # Discard degenerate zero-area or out-of-bounds boxes
+            if bx2 <= bx1 or by2 <= by1:
+                continue
 
             detections.append(
                 Detection(
@@ -201,4 +209,21 @@ class RTDetrV2ONNXModel:
                 )
             )
 
+        if intra_tile_nms_threshold > 0.0 and len(detections) > 1:
+            from .merger import NMS
+
+            nms = NMS(iou_threshold=intra_tile_nms_threshold, match_metric=intra_tile_match_metric)
+            detections = nms.merge(detections)
+
         return detections
+
+
+# Model aliases for RT-DETR version parity
+RTDetrONNXModel = RTDetrV2ONNXModel
+RTDetrV4ONNXModel = RTDetrV2ONNXModel
+
+__all__ = [
+    "RTDetrV2ONNXModel",
+    "RTDetrONNXModel",
+    "RTDetrV4ONNXModel",
+]

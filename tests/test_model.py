@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tests  # noqa: F401  # isort: skip
+
 import unittest
 from pathlib import Path
 from typing import Any, Sequence
@@ -9,7 +11,7 @@ from typing import Any, Sequence
 import numpy as np
 from PIL import Image
 
-from autocfu.model import RTDetrV2ONNXModel
+from autocfu.model import RTDetrONNXModel, RTDetrV2ONNXModel, RTDetrV4ONNXModel
 
 try:
     import onnxruntime as _ort
@@ -157,6 +159,74 @@ class TestRTDetrV2ONNXModel(unittest.TestCase):
         self.assertAlmostEqual(by1, 16.0)  # 64 * 0.25
         self.assertAlmostEqual(bx2, 160.0)  # 320 * 0.5
         self.assertAlmostEqual(by2, 80.0)  # 320 * 0.25
+
+    def test_model_aliases(self) -> None:
+        """Verify that RTDetrONNXModel and RTDetrV4ONNXModel alias RTDetrV2ONNXModel."""
+        self.assertIs(RTDetrONNXModel, RTDetrV2ONNXModel)
+        self.assertIs(RTDetrV4ONNXModel, RTDetrV2ONNXModel)
+
+    def test_coordinate_clamping(self) -> None:
+        """Verify predicted coordinates outside slice bounds are clamped to [0, orig_w/h]."""
+        labels = np.array([0], dtype=np.int64)
+        # Bounding box exceeding image boundary: negative coords and coords > 640
+        boxes = np.array([[[-50.0, -20.0, 700.0, 750.0]]], dtype=np.float32)
+        scores = np.array([[0.95]], dtype=np.float32)
+
+        mock_sess = MockSession(outputs=[labels, boxes, scores])
+        model = RTDetrV2ONNXModel(session=mock_sess, input_size=640)
+
+        img = Image.new("RGB", (640, 640))
+        dets = model.predict_slice(img)
+        self.assertEqual(len(dets), 1)
+        bx1, by1, bx2, by2 = dets[0].bbox
+        self.assertEqual(bx1, 0.0)
+        self.assertEqual(by1, 0.0)
+        self.assertEqual(bx2, 640.0)
+        self.assertEqual(by2, 640.0)
+
+    def test_degenerate_boxes_filtered(self) -> None:
+        """Verify degenerate zero-area boxes (e.g. completely out-of-bounds) are discarded."""
+        labels = np.array([0, 0], dtype=np.int64)
+        # First box is completely outside left boundary, second is valid
+        boxes = np.array([[[-50.0, -20.0, -5.0, -10.0], [50.0, 50.0, 100.0, 100.0]]], dtype=np.float32)
+        scores = np.array([[0.95, 0.90]], dtype=np.float32)
+
+        mock_sess = MockSession(outputs=[labels, boxes, scores])
+        model = RTDetrV2ONNXModel(session=mock_sess, input_size=640)
+
+        img = Image.new("RGB", (640, 640))
+        dets = model.predict_slice(img)
+        self.assertEqual(len(dets), 1)
+        self.assertEqual(dets[0].bbox, (50.0, 50.0, 100.0, 100.0))
+
+    def test_intra_tile_nms_suppression(self) -> None:
+        """Verify intra-tile NMS suppresses duplicate decoder query detections within the tile."""
+        labels = np.array([0, 0], dtype=np.int64)
+        # Two almost identical queries for the same colony:
+        boxes = np.array([[[20.0, 20.0, 40.0, 40.0], [21.0, 21.0, 41.0, 41.0]]], dtype=np.float32)
+        scores = np.array([[0.90, 0.85]], dtype=np.float32)
+
+        mock_sess = MockSession(outputs=[labels, boxes, scores])
+        model = RTDetrV2ONNXModel(session=mock_sess, input_size=640)
+
+        img = Image.new("RGB", (640, 640))
+        # With intra-tile NMS enabled (threshold 0.45)
+        dets_suppressed = model.predict_slice(
+            img,
+            confidence_threshold=0.50,
+            intra_tile_nms_threshold=0.45,
+            intra_tile_match_metric="ios",
+        )
+        self.assertEqual(len(dets_suppressed), 1)
+        self.assertAlmostEqual(dets_suppressed[0].score, 0.90)
+
+        # Without intra-tile NMS (threshold 0.0 disables)
+        dets_unsuppressed = model.predict_slice(
+            img,
+            confidence_threshold=0.50,
+            intra_tile_nms_threshold=0.0,
+        )
+        self.assertEqual(len(dets_unsuppressed), 2)
 
     @unittest.skipIf(ort is None, "onnxruntime is not installed")
     def test_real_onnx_model_loading(self) -> None:

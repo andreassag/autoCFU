@@ -245,12 +245,22 @@ class AutoCFUEngine:
         raw_detections: list[Detection] = []
 
         for window, crop in slices:
-            slice_dets = self.model.predict_slice(
-                crop=crop,
-                confidence_threshold=self.config.inference.confidence_threshold,
-                target_class_id=self.config.inference.target_class_id,
-                class_name=self.config.inference.class_name,
-            )
+            try:
+                slice_dets = self.model.predict_slice(
+                    crop=crop,
+                    confidence_threshold=self.config.inference.confidence_threshold,
+                    target_class_id=self.config.inference.target_class_id,
+                    class_name=self.config.inference.class_name,
+                    intra_tile_nms_threshold=self.config.inference.intra_tile_nms_threshold,
+                    intra_tile_match_metric=self.config.inference.intra_tile_match_metric,
+                )
+            except TypeError:
+                slice_dets = self.model.predict_slice(
+                    crop=crop,
+                    confidence_threshold=self.config.inference.confidence_threshold,
+                    target_class_id=self.config.inference.target_class_id,
+                    class_name=self.config.inference.class_name,
+                )
 
             # Translate slice coordinates into full-plate coordinate space
             for det in slice_dets:

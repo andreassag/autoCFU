@@ -101,6 +101,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override postprocess match IoU/IoS threshold (e.g. 0.50).",
     )
     parser.add_argument(
+        "--intra-tile-threshold",
+        type=float,
+        default=None,
+        help="Override intra-tile NMS duplicate query suppression threshold (e.g. 0.45, 0 to disable).",
+    )
+    parser.add_argument(
+        "--intra-tile-metric",
+        type=str,
+        default=None,
+        choices=["iou", "ios"],
+        help="Override intra-tile match metric (iou or ios).",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="auto",
@@ -147,6 +160,10 @@ def main(args_list: list[str] | None = None) -> int:
         config.inference.match_metric = args.match_metric
     if args.match_threshold is not None:
         config.inference.postprocess_match_threshold = args.match_threshold
+    if args.intra_tile_threshold is not None:
+        config.inference.intra_tile_nms_threshold = args.intra_tile_threshold
+    if args.intra_tile_metric is not None:
+        config.inference.intra_tile_match_metric = args.intra_tile_metric
 
     # 2. Gather image paths
     image_paths: list[Path] = []
