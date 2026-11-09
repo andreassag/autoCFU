@@ -24,6 +24,16 @@ from autocfu.utils import (
 
 
 class TestUtils(unittest.TestCase):
+    def test_top_level_exports(self) -> None:
+        """Verify that utility helpers are cleanly re-exported at top-level package namespace."""
+        import autocfu
+
+        self.assertTrue(callable(autocfu.compute_detection_metrics))
+        self.assertTrue(callable(autocfu.is_valid_highres_plate))
+        self.assertTrue(callable(autocfu.extract_gt_colony_boxes))
+        self.assertTrue(callable(autocfu.stream_sample_plate))
+        self.assertTrue(callable(autocfu.plot_plate_detections))
+
     def test_is_valid_highres_plate(self) -> None:
         # Valid sample with PIL Image
         img_valid = Image.new("RGB", (4000, 4000))
