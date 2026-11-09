@@ -7,7 +7,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from autocfu.merger import calculate_iou
+from .merger import calculate_iou
 
 logger = logging.getLogger(__name__)
 
