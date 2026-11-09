@@ -134,7 +134,11 @@ class GreedyNMM:
         iou_threshold: float = 0.50,
         class_agnostic: bool = False,
         match_metric: str = "iou",
+        *,
+        match_threshold: float | None = None,
     ) -> None:
+        if match_threshold is not None:
+            iou_threshold = match_threshold
         if not (0.0 <= iou_threshold <= 1.0):
             raise ValueError("iou_threshold must be between 0.0 and 1.0")
         self.iou_threshold = iou_threshold
@@ -224,7 +228,11 @@ class NMS:
         iou_threshold: float = 0.50,
         class_agnostic: bool = False,
         match_metric: str = "iou",
+        *,
+        match_threshold: float | None = None,
     ) -> None:
+        if match_threshold is not None:
+            iou_threshold = match_threshold
         if not (0.0 <= iou_threshold <= 1.0):
             raise ValueError("iou_threshold must be between 0.0 and 1.0")
         self.iou_threshold = iou_threshold
@@ -269,8 +277,12 @@ def get_merger(
     merger_type: str = "greedy_nmm",
     iou_threshold: float = 0.50,
     match_metric: str = "iou",
+    *,
+    match_threshold: float | None = None,
 ) -> GreedyNMM | NMS:
     """Factory creating the specified post-processing merger."""
+    if match_threshold is not None:
+        iou_threshold = match_threshold
     m_type = merger_type.strip().lower()
     if m_type in ("greedy_nmm", "greedynmm", "nmm"):
         return GreedyNMM(iou_threshold=iou_threshold, match_metric=match_metric)

@@ -22,7 +22,7 @@ fi
 echo "=== 1. Upgrading AutoCFU Dependencies ==="
 if command -v "${UV}" >/dev/null 2>&1; then
     echo "Using uv to upgrade dependencies..."
-    if ! "${UV}" pip install --python "${PYTHON}" --upgrade -e ".[dev]"; then
+    if ! "${UV}" pip install --python "${PYTHON}" --upgrade -e ".[dev,docs]"; then
         echo "Warning: Failed to upgrade dependencies from remote package index (offline or network-restricted environment). Proceeding with installed packages..."
     fi
 elif [ -f "${PYTHON}" ]; then
@@ -30,7 +30,7 @@ elif [ -f "${PYTHON}" ]; then
     if ! "${PYTHON}" -m pip install --upgrade pip; then
         echo "Warning: Failed to upgrade pip (network restricted)."
     fi
-    if ! "${PYTHON}" -m pip install --upgrade -e ".[dev]"; then
+    if ! "${PYTHON}" -m pip install --upgrade -e ".[dev,docs]"; then
         echo "Warning: Failed to upgrade dependencies from remote package index (offline or network-restricted environment). Proceeding with installed packages..."
     fi
 fi
@@ -43,5 +43,8 @@ make lint
 
 echo "=== 4. Running Unit Tests (make test) ==="
 make test
+
+echo "=== 5. Building Documentation (make docs) ==="
+make docs
 
 echo "=== All dependency updates and verification checks completed successfully ==="

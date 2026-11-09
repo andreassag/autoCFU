@@ -12,14 +12,14 @@ This directory is the designated local storage path for trained model weights an
 
 | Model File | Backbone | Resolution | Queries | Format |
 | :--- | :--- | :--- | :--- | :--- |
-| `rtdetrv2_r18vd_agar_640.onnx` | ResNet-18-vd | 640×640 | 300 | ONNX (opset 16+) |
-| `rtdetrv2_r34vd_agar_640.onnx` | ResNet-34-vd | 640×640 | 300 | ONNX (opset 16+) |
+| `rtdetrv4_r18vd_640.onnx` | ResNet-18-vd | 640×640 | 300 | ONNX (opset 16+) |
+| `rtdetrv4_r34vd_640.onnx` | ResNet-34-vd | 640×640 | 300 | ONNX (opset 16+) |
 
 ---
 
 ## ONNX Model Tensor Signatures
 
-The inference engine expects RT-DETRv2 models exported with the following standard signatures:
+The inference engine expects RT-DETRv4 models exported with the following standard signatures:
 
 ### Inputs
 1. **`images`**:
@@ -47,17 +47,15 @@ The inference engine expects RT-DETRv2 models exported with the following standa
 
 ---
 
-## How to Generate Model Weights
+## Providing Model Weights
 
-Model training and export pipelines are maintained in the companion repository [autoCFU-training](https://github.com/andreassag/autoCFU-training):
+Export your trained RT-DETRv4 model checkpoint to ONNX format and place the resulting `.onnx` file in this `models/` directory:
 
-1. Follow the training workflow in `autoCFU-training` (via `notebooks/02-train-RT-DETRv2-colony-detection.ipynb` in Google Colab or via `scripts/train.py`).
-2. Run fine-tuning on the 640×640 tiled AGAR dataset.
-3. Export the trained checkpoint to ONNX (`RTDETR.export()`).
-4. Place the resulting `.onnx` file in this `models/` directory:
-   ```bash
-   cp path/to/rtdetrv2_r18vd_agar_640.onnx models/
-   ```
+```bash
+cp path/to/rtdetrv4_r18vd_640.onnx models/
+```
+
+Verify that your ONNX artifact conforms to the input and output tensor contracts detailed above.
 
 
 ---

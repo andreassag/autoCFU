@@ -9,9 +9,9 @@ This document serves as the canonical technical guide and operating standard for
 ### 1.1 Decoupled Architecture
 `autoCFU` is a production-grade, lightweight inference engine and command-line utility for automated detection, segmentation, and enumeration of microbial colonies on Petri dishes.
 
-The system is decoupled across two dedicated repositories:
+The system is architecturally decoupled from model training and dataset preparation:
 - **`autoCFU` (This Repository)**: Hosts the standalone inference engine, CLI, slicing, merging, and ONNX Runtime execution pipeline. It intentionally excludes heavyweight machine learning training frameworks (such as PyTorch, TorchVision, or CUDA build toolchains) from runtime dependencies to keep installation lightweight and portable.
-- **`autoCFU-training` (Companion Repository)**: Hosts dataset preparation pipelines (AGAR dataset parsing, high-resolution tile slicing, annotation conversion), deep learning model fine-tuning (RT-DETRv2 and RT-DETRv4), hyperparameter optimization, and ONNX model export.
+- **Training & Dataset Pipelines**: Handled separately outside of this repository to maintain a minimal, dependency-light inference footprint. Models are trained, validated, and exported to ONNX format before deployment into `autoCFU`.
 
 ```
 autoCFU/
@@ -19,7 +19,9 @@ autoCFU/
 │   ├── dependabot.yml          # Automated weekly dependency updates (pip & GitHub Actions)
 │   └── workflows/
 │       ├── ci.yml              # Multi-version CI matrix (Python 3.10, 3.11, 3.12)
-│       └── dependabot-auto-merge.yml # Automated Dependabot PR approval and auto-merge
+│       ├── dependabot-auto-merge.yml # Automated Dependabot PR approval and auto-merge
+│       └── docs.yml            # Automated GitHub Pages Sphinx documentation deployment
+├── docs/                       # Sphinx documentation suite (Furo theme, Guides, API reference)
 ├── configs/
 │   └── default_inference.yaml  # Default slicing, overlap, and merger parameters
 ├── src/
@@ -30,7 +32,8 @@ autoCFU/
 │       ├── merger.py           # Greedy Non-Maximum Merging (GreedyNMM & NMS)
 │       ├── model.py            # ONNX Runtime session manager and post-processing
 │       ├── pipeline.py         # Full-dish sliced inference orchestrator
-│       └── slicer.py           # 2D grid window tiling and coordinate translation
+│       ├── slicer.py           # 2D grid window tiling and coordinate translation
+│       └── utils.py            # Inspection, dataset streaming, and visualization helpers
 ├── tests/                      # Unit and integration test suite
 ├── models/
 │   └── README.md               # Model artifact specifications and export instructions
@@ -54,8 +57,8 @@ High-resolution Petri dish photography typically captures agar plates at 4000×4
 4. **Greedy Non-Maximum Merging (`merger.py`)**: Merges redundant detections across overlapping tile boundaries using GreedyNMM or standard NMS, clustering intersecting bounding boxes and computing confidence-weighted centroid coordinates:
    $$\mathbf{box}_{\text{merged}} = \frac{\sum_{i} \text{score}_i \times \mathbf{box}_i}{\sum_{i} \text{score}_i}$$
 
-### 1.3 Upstream ONNX Tensor Contract (RT-DETRv2 & RT-DETRv4)
-Models trained in `autoCFU-training` are exported using the RT-DETRv2 or RT-DETRv4 ONNX export pipeline. The `autoCFU` model runner (`RTDetrV2ONNXModel`) expects the following tensor contracts:
+### 1.3 Upstream ONNX Tensor Contract (RT-DETRv4)
+Models are exported using the RT-DETRv4 ONNX export pipeline. The `autoCFU` model runner (`RTDetrV4ONNXModel` / `RTDetrONNXModel`) expects the following tensor contracts:
 
 #### Inputs
 | Input Name | Shape | Dtype | Range / Layout | Description |
@@ -71,7 +74,7 @@ Models trained in `autoCFU-training` are exported using the RT-DETRv2 or RT-DETR
 | `scores`, `pred_scores`, `confs` | `[batch_size, num_queries]` | `float32` | Prediction confidence scores in `[0.0, 1.0]`. |
 
 *Note on Architecture Parity*:
-- `_find_output_tensor` searches across candidate output names for compatibility across RT-DETRv2, RT-DETRv4, and custom ONNX graph exporters.
+- `_find_output_tensor` searches across candidate output names for compatibility across RT-DETRv4 and custom ONNX graph exporters.
 - `_safe_unbatch` safely strips leading batch dimensions when `batch_size == 1`.
 - If `orig_target_sizes` is not accepted by the ONNX graph and resizing occurred, coordinates are dynamically rescaled by $(w_{\text{orig}} / w_{\text{input}}, h_{\text{orig}} / h_{\text{input}})$.
 
@@ -189,7 +192,7 @@ Any Rust implementation of algorithms existing in Python (such as `slicer` or `m
 - **Centroid Merging**: Weighted coordinate averages must match `sum(score_i * coord_i) / sum(score_i)`.
 
 ### 3.5 Technology Exclusions
-- **Jupyter Notebooks (`.ipynb`) are strictly excluded** from `autoCFU`. Interactive experiments and training notebooks belong exclusively in `autoCFU-training`.
+- **Jupyter Notebooks (`.ipynb`) are strictly excluded** from `autoCFU`. Training notebooks and interactive experiments belong outside this inference repository.
 - **C++ is strictly excluded**. Rust is the designated native language for systems-level performance extensions.
 
 ---
@@ -200,11 +203,13 @@ The repository includes a comprehensive `Makefile` providing standardized develo
 
 | Command | Description |
 | :--- | :--- |
-| `make install` | Creates virtual environment (`uv` preferred, fallback to `python3 -m venv`), installs `.[dev]` in editable mode, and configures pre-commit hooks. |
+| `make install` | Creates virtual environment (`uv` preferred, fallback to `python3 -m venv`), installs `.[dev,docs]` in editable mode, and configures pre-commit hooks. |
 | `make test` | Executes unit tests via `pytest tests`. |
 | `make lint` | Runs `ruff check src/ tests/` and `ty check src/ tests/` across the codebase. |
 | `make typecheck` | Runs static type checking via `ty check src/ tests/`. |
 | `make format` | Formats Python code using `ruff format src/ tests/`. |
+| `make docs` | Builds Sphinx HTML documentation (`sphinx-build -b html -W docs docs/_build/html`). |
+| `make docs-clean` | Removes Sphinx documentation build artifacts (`rm -rf docs/_build`). |
 | `make pre-commit` | Runs pre-commit hooks across all staged and repository files. |
 | `make clean` | Cleans build artifacts, egg metadata, and Python test caches. |
 | `make act` | Executes GitHub Actions CI workflow locally using `act` / `gh act`. |
@@ -221,11 +226,12 @@ The repository includes a comprehensive `Makefile` providing standardized develo
 - CI workflow execution steps:
   1. Check out repository via `actions/checkout@v7`.
   2. Set up Python runtime via `actions/setup-python@v7` and `astral-sh/setup-uv@v7`.
-  3. Install dependencies: `uv pip install --system -e ".[dev]"`.
+  3. Install dependencies: `uv pip install --system -e ".[dev,docs]"`.
   4. Format verification: `ruff format --check src/ tests/`.
   5. Linter verification: `ruff check src/ tests/`.
   6. Static type checking: `ty check src/ tests/`.
   7. Test execution: `pytest tests/`.
+  8. Sphinx doc build: `sphinx-build -b html -W docs docs/_build/html`.
 
 ### 5.2 Dependabot Configuration (`.github/dependabot.yml`)
 - Configured with `version: 2`.
@@ -252,6 +258,13 @@ gh act pull_request
 ```
 *(Requires `act` or the GitHub CLI extension `nektos/gh-act` with Docker running.)*
 
+### 5.5 GitHub Pages Documentation Deployment (`.github/workflows/docs.yml`)
+- Automatically builds Sphinx HTML documentation on `pull_request` (verifying PRs that touch `docs/**`, `src/**`, `pyproject.toml`, or `.github/workflows/docs.yml` without deploying) and upon `push` to `main` or via `workflow_dispatch`.
+- Builds with strict warning-as-error flag (`-W`) to prevent broken cross-references or malformed docstrings.
+- Generates `docs/_build/html/.nojekyll` and uploads the artifact via `actions/upload-pages-artifact@v4` on pushes to `main`.
+- Deploys to GitHub Pages via `actions/deploy-pages@v4` in the `github-pages` environment upon merge/push to `main`.
+- *Repository Setting*: In GitHub repository settings under **Settings > Pages > Build and deployment**, ensure **Source** is set to **GitHub Actions**.
+
 ---
 
 ## 6. What to Update When Making Changes (Checklist)
@@ -268,15 +281,17 @@ Whenever modifying existing features or introducing new capabilities, follow thi
    - Cover boundary conditions: empty images, zero detections, single-tile vs multi-tile images, invalid inputs.
 
 3. **Documentation & Configurations**
-   - If CLI options or inference defaults change, update `configs/default_inference.yaml` and `README.md`.
-   - If ONNX tensor signatures change, update `models/README.md` and document the contract in `AGENTS.md`.
+   - If CLI options or inference defaults change, update `configs/default_inference.yaml`, `README.md`, and `docs/cli.rst`.
+   - If ONNX tensor signatures change, update `models/README.md` and document the contract in `AGENTS.md` and `docs/index.rst`.
+   - If new public modules or methods are added, update `docs/api/`.
 
 4. **Formatting, Linting & Type Checking**
    - Format: `make format`
    - Lint & Type-Check: `make lint` / `make typecheck` (must pass with 0 errors in both `ruff` and `ty`)
 
-5. **Unit Tests Execution**
+5. **Unit Tests & Documentation Build**
    - Run tests: `make test` (all tests must pass)
+   - Run docs: `make docs` (Sphinx build must pass with 0 warnings/errors)
 
 6. **Pre-commit Checks**
    - Run: `make pre-commit`

@@ -1,4 +1,4 @@
-.PHONY: help install pre-commit test lint typecheck format clean act update-deps
+.PHONY: help install pre-commit test lint typecheck format docs docs-clean clean act update-deps
 
 VENV ?= .venv
 PYTHON ?= $(VENV)/bin/python
@@ -7,6 +7,7 @@ PRECOMMIT ?= $(VENV)/bin/pre-commit
 PYTEST ?= $(VENV)/bin/pytest
 RUFF ?= $(VENV)/bin/ruff
 TY ?= $(VENV)/bin/ty
+SPHINXBUILD ?= $(VENV)/bin/sphinx-build
 
 help:
 	@echo "Available commands:"
@@ -16,6 +17,8 @@ help:
 	@echo "  make lint            - Run linter and type checks (ruff, ty)"
 	@echo "  make typecheck       - Run static type checker (ty)"
 	@echo "  make format          - Format python code (ruff)"
+	@echo "  make docs            - Build Sphinx HTML documentation"
+	@echo "  make docs-clean      - Remove Sphinx build artifacts"
 	@echo "  make clean           - Remove build, cache, and test artifacts"
 	@echo "  make act             - Run GitHub Actions CI locally using act"
 	@echo "  make update-deps     - Upgrade dependencies and run formatting, linting, and tests"
@@ -24,12 +27,12 @@ install:
 	@if command -v $(UV) >/dev/null 2>&1; then \
 		echo "Creating virtual environment and installing with $(UV)..."; \
 		$(UV) venv --allow-existing $(VENV) --python 3.12 2>/dev/null || $(UV) venv --allow-existing $(VENV); \
-		$(UV) pip install --python $(PYTHON) -e ".[dev]"; \
+		$(UV) pip install --python $(PYTHON) -e ".[dev,docs]"; \
 	else \
 		echo "Creating virtual environment with python3..."; \
 		python3 -m venv $(VENV); \
 		$(PYTHON) -m pip install --upgrade pip; \
-		$(PYTHON) -m pip install -e ".[dev]"; \
+		$(PYTHON) -m pip install -e ".[dev,docs]"; \
 	fi
 	@echo "Installing pre-commit git hooks..."
 	@if [ -f $(PRECOMMIT) ]; then \
@@ -88,8 +91,22 @@ format:
 		echo "ruff not found. Run 'make install' first."; exit 1; \
 	fi
 
+docs:
+	@if [ -f $(SPHINXBUILD) ]; then \
+		$(SPHINXBUILD) -b html -W docs docs/_build/html; \
+	elif command -v sphinx-build >/dev/null 2>&1; then \
+		sphinx-build -b html -W docs docs/_build/html; \
+	elif [ -f $(PYTHON) ]; then \
+		$(PYTHON) -m sphinx -b html -W docs docs/_build/html; \
+	else \
+		python3 -m sphinx -b html -W docs docs/_build/html; \
+	fi
+
+docs-clean:
+	@rm -rf docs/_build
+
 clean:
-	@rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .ruff_cache
+	@rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .ruff_cache docs/_build
 	@find . -type d -name "__pycache__" -exec rm -rf {} +
 
 act:

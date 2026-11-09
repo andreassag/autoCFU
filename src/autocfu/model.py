@@ -1,4 +1,4 @@
-"""ONNX Runtime session wrapper for RT-DETRv2 colony detection models."""
+"""ONNX Runtime session wrapper for RT-DETRv4 colony detection models."""
 
 from __future__ import annotations
 
@@ -19,7 +19,15 @@ ort: Any = _ort
 
 
 def _safe_unbatch(arr: np.ndarray, target_min_dim: int) -> np.ndarray:
-    """Safely strip leading batch dimension if batch size is 1."""
+    """Safely strip leading batch dimension if batch size is 1.
+
+    Args:
+        arr: Array-like input tensor.
+        target_min_dim: Minimum number of dimensions expected for unbatched tensor.
+
+    Returns:
+        NumPy array with leading batch dimension removed if redundant.
+    """
     arr = np.asarray(arr)
     if arr.ndim > target_min_dim and arr.shape[0] == 1:
         arr = arr[0]
@@ -28,21 +36,47 @@ def _safe_unbatch(arr: np.ndarray, target_min_dim: int) -> np.ndarray:
 
 def _find_output_tensor(
     output_dict: dict[str, Any],
-    raw_outputs: list[Any],
+    raw_outputs: Sequence[Any],
     candidates: Sequence[str],
     fallback_index: int,
 ) -> np.ndarray:
-    """Locate an output tensor by possible name candidates or fallback index."""
+    """Locate an output tensor by possible name candidates or fallback index.
+
+    Attempts to locate the target tensor first by exact candidate name matching,
+    then by case-insensitive candidate name matching in `output_dict`. If no candidate
+    name matches, falls back to positional indexing within `raw_outputs`.
+
+    Args:
+        output_dict: Mapping of output node names to output tensors.
+        raw_outputs: Sequence of raw output tensors returned by the inference session.
+        candidates: Preferred output node names in descending priority order.
+        fallback_index: 0-based positional index in `raw_outputs` if candidate names match fails.
+
+    Returns:
+        The matched NumPy array or tensor output.
+
+    Raises:
+        ValueError: If `raw_outputs` is empty and no candidate tensor could be found.
+    """
     for name in candidates:
-        if name in output_dict:
+        if name in output_dict and output_dict[name] is not None:
             return output_dict[name]
-    if len(raw_outputs) > fallback_index:
+
+    lower_dict = {k.lower(): v for k, v in output_dict.items() if v is not None}
+    for name in candidates:
+        if name.lower() in lower_dict:
+            return lower_dict[name.lower()]
+
+    if 0 <= fallback_index < len(raw_outputs):
         return raw_outputs[fallback_index]
-    return raw_outputs[0]
+    if len(raw_outputs) > 0:
+        return raw_outputs[0]
+
+    raise ValueError("Cannot locate output tensor: `raw_outputs` is empty and no candidates matched.")
 
 
-class RTDetrV2ONNXModel:
-    """Wrapper managing ONNX Runtime inference sessions for RT-DETRv2 models."""
+class RTDetrV4ONNXModel:
+    """Wrapper managing ONNX Runtime inference sessions for RT-DETRv4 models."""
 
     def __init__(
         self,
@@ -51,6 +85,13 @@ class RTDetrV2ONNXModel:
         input_size: int = 640,
         session: Any | None = None,
     ) -> None:
+        global ort
+        if ort is None and session is None:
+            try:
+                import onnxruntime as ort
+            except ImportError:
+                pass
+
         if ort is None and session is None:
             raise ImportError("onnxruntime is required for model inference. Install it via `pip install onnxruntime`.")
 
@@ -94,8 +135,15 @@ class RTDetrV2ONNXModel:
         else:
             raise ValueError("Either 'model_path' or 'session' must be provided.")
 
-        self._input_names = [inp.name for inp in self.session.get_inputs()]
-        self._output_names = [out.name for out in self.session.get_outputs()]
+        if hasattr(self.session, "get_inputs"):
+            self._input_names = [inp.name for inp in self.session.get_inputs()]
+        else:
+            self._input_names = ["images"]
+
+        if hasattr(self.session, "get_outputs"):
+            self._output_names = [out.name for out in self.session.get_outputs()]
+        else:
+            self._output_names = []
 
     @staticmethod
     def _resolve_providers(device: str) -> list[str]:
@@ -119,6 +167,9 @@ class RTDetrV2ONNXModel:
         class_name: str = "colony",
         intra_tile_nms_threshold: float = 0.0,
         intra_tile_match_metric: str = "ios",
+        min_box_size: float = 0.0,
+        max_box_size: float = 0.0,
+        max_aspect_ratio: float = 0.0,
     ) -> list[Detection]:
         """Perform object detection on an individual image tile/slice.
 
@@ -129,6 +180,10 @@ class RTDetrV2ONNXModel:
             class_name: Human-readable label name for detected objects.
             intra_tile_nms_threshold: Metric threshold for intra-tile duplicate query suppression (0.0 disables).
             intra_tile_match_metric: Overlap metric for intra-tile suppression ('iou' or 'ios').
+            min_box_size: Minimum width or height in pixels (0.0 disables).
+            max_box_size: Maximum width or height in pixels (0.0 disables).
+            max_aspect_ratio: Maximum aspect ratio max(w/h, h/w) allowed (0.0 disables). Also suppresses
+                elongated border rim-glare slivers.
 
         Returns:
             List of Detection objects in coordinates relative to the slice [0, crop_w/h].
@@ -142,6 +197,8 @@ class RTDetrV2ONNXModel:
             raise TypeError(f"Expected PIL Image or numpy array, got {type(crop)}")
 
         orig_w, orig_h = pil_img.size
+        if orig_w == 0 or orig_h == 0:
+            return []
 
         if orig_w != self.input_size or orig_h != self.input_size:
             resized_img = pil_img.resize((self.input_size, self.input_size), Image.Resampling.BILINEAR)
@@ -157,8 +214,10 @@ class RTDetrV2ONNXModel:
         feed_dict: dict[str, Any] = {}
         if "images" in self._input_names:
             feed_dict["images"] = blob
-        else:
+        elif self._input_names:
             feed_dict[self._input_names[0]] = blob
+        else:
+            feed_dict["images"] = blob
 
         has_orig_sizes = "orig_target_sizes" in self._input_names
         if has_orig_sizes:
@@ -197,8 +256,30 @@ class RTDetrV2ONNXModel:
             by2 = max(0.0, min(float(orig_h), float(box[3]) * scale_y))
 
             # Discard degenerate zero-area or out-of-bounds boxes
-            if bx2 <= bx1 or by2 <= by1:
+            bw = bx2 - bx1
+            bh = by2 - by1
+            if bw <= 0.0 or bh <= 0.0:
                 continue
+
+            if min_box_size > 0.0 and (bw < min_box_size or bh < min_box_size):
+                continue
+
+            if max_box_size > 0.0 and (bw > max_box_size or bh > max_box_size):
+                continue
+
+            if max_aspect_ratio > 0.0:
+                aspect_ratio = max(bw / bh, bh / bw)
+                if aspect_ratio > max_aspect_ratio:
+                    continue
+                border_margin = 2.0
+                touches_border = (
+                    bx1 <= border_margin
+                    or by1 <= border_margin
+                    or bx2 >= (orig_w - border_margin)
+                    or by2 >= (orig_h - border_margin)
+                )
+                if touches_border and max(bw, bh) > 20.0 and aspect_ratio > 1.8:
+                    continue
 
             detections.append(
                 Detection(
@@ -219,11 +300,11 @@ class RTDetrV2ONNXModel:
 
 
 # Model aliases for RT-DETR version parity
-RTDetrONNXModel = RTDetrV2ONNXModel
-RTDetrV4ONNXModel = RTDetrV2ONNXModel
+RTDetrONNXModel = RTDetrV4ONNXModel
+RTDetrV2ONNXModel = RTDetrV4ONNXModel  # Backwards compatibility alias
 
 __all__ = [
-    "RTDetrV2ONNXModel",
-    "RTDetrONNXModel",
     "RTDetrV4ONNXModel",
+    "RTDetrONNXModel",
+    "RTDetrV2ONNXModel",
 ]

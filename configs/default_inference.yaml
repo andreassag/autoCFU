@@ -16,5 +16,8 @@ inference:
   match_metric: "ios" # Options: "iou", "ios"
   intra_tile_nms_threshold: 0.45 # Intra-tile query duplicate suppression (0.0 disables)
   intra_tile_match_metric: "ios" # Metric for intra-tile suppression: "iou" or "ios"
+  min_box_size: 0.0 # Minimum colony bounding box dimension in pixels (0.0 disables)
+  max_box_size: 0.0 # Maximum colony bounding box dimension in pixels (0.0 disables)
+  max_aspect_ratio: 0.0 # Maximum aspect ratio max(w/h, h/w) (0.0 disables)
   target_class_id: 0
   class_name: "colony"

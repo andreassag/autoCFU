@@ -86,6 +86,14 @@ class TestPlateSlicer(unittest.TestCase):
         self.assertEqual(slicer.step_x, 428)
         self.assertEqual(slicer.step_y, 428)
 
+    def test_overlap_ratio_alias(self) -> None:
+        """Verify overlap_ratio keyword argument sets both width and height overlap ratios."""
+        slicer = PlateSlicer(slice_width=640, slice_height=640, overlap_ratio=0.25)
+        self.assertEqual(slicer.overlap_width_ratio, 0.25)
+        self.assertEqual(slicer.overlap_height_ratio, 0.25)
+        self.assertEqual(slicer.step_x, 480)
+        self.assertEqual(slicer.step_y, 480)
+
     def test_invalid_parameters(self) -> None:
         """Verify parameter validation for slice sizes and overlap ratios."""
         with self.assertRaises(ValueError):

@@ -41,7 +41,12 @@ class PlateSlicer:
         slice_height: int = 640,
         overlap_width_ratio: float = 0.20,
         overlap_height_ratio: float = 0.20,
+        *,
+        overlap_ratio: float | None = None,
     ) -> None:
+        if overlap_ratio is not None:
+            overlap_width_ratio = overlap_ratio
+            overlap_height_ratio = overlap_ratio
         if slice_width <= 0 or slice_height <= 0:
             raise ValueError("Slice dimensions must be positive integers.")
         if not (0.0 <= overlap_width_ratio < 1.0) or not (0.0 <= overlap_height_ratio < 1.0):
@@ -103,7 +108,7 @@ class PlateSlicer:
         """Slice an image into cropped numpy array tiles with their slice coordinates.
 
         Returns:
-            List of tuples: (SliceWindow, cropped_tile_as_numpy_rgb)
+            list[tuple[SliceWindow, np.ndarray]]: List of (SliceWindow, cropped_tile_as_numpy_rgb) pairs.
         """
         if isinstance(image, Image.Image):
             width, height = image.size

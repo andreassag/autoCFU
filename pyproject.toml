@@ -26,6 +26,11 @@ dev = [
     "ruff>=0.1.0",
     "ty>=0.0.1a1",
 ]
+docs = [
+    "sphinx>=7.0.0",
+    "furo>=2024.1.0",
+    "sphinx-autodoc-typehints>=1.25.0",
+]
 
 [project.scripts]
 autocfu = "autocfu.cli:main"

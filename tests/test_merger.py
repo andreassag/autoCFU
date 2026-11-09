@@ -106,6 +106,17 @@ class TestMerger(unittest.TestCase):
         self.assertIsInstance(m2, NMS)
         self.assertEqual(m2.iou_threshold, 0.60)
 
+    def test_match_threshold_alias(self) -> None:
+        """Verify match_threshold keyword parameter acts as an alias for iou_threshold."""
+        gnmm = GreedyNMM(match_threshold=0.55)
+        self.assertEqual(gnmm.iou_threshold, 0.55)
+
+        nms = NMS(match_threshold=0.65)
+        self.assertEqual(nms.iou_threshold, 0.65)
+
+        factory_gnmm = get_merger("greedy_nmm", match_threshold=0.48)
+        self.assertEqual(factory_gnmm.iou_threshold, 0.48)
+
     def test_calculate_ios(self) -> None:
         # Box A: [0, 0, 10, 10] (area 100)
         # Box B: [0, 0, 5, 5] (area 25, fully inside Box A)

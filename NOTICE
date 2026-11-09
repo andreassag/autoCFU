@@ -7,18 +7,16 @@ This product includes software developed by Andreas Sagen.
 Third-Party Software and Datasets Notice
 ================================================================================
 
-1. RT-DETRv2 (Real-Time DEtection TRansformer v2)
-   Website: https://github.com/lyuwenyu/RT-DETR
-   License: Apache License 2.0 (see licenses/LICENSE-RT-DETRv2.txt)
-   Copyright (c) 2024 lyuwenyu
+1. RT-DETR / RT-DETRv4 (Real-Time DEtection TRansformer)
+   Website: https://github.com/AIMIA-PKU/RT-DETRv4
+   License: Apache License 2.0 (see licenses/LICENSE-RT-DETRv4.txt)
+   Copyright (c) 2025 The RT-DETRv4 Authors
    Reference:
-     Wenyu Lv, Yian Zhao, Qinyao Chang, Kui Huang, Guanzhong Wang, Yi Liu.
-     "RT-DETRv2: Improved Baseline with Bag-of-Freebies for Real-Time Detection Transformer."
-     arXiv preprint arXiv:2407.17140, 2024.
+     Zijun Liao, Yian Zhao, Xin Shan, Yu Yan, Chang Liu, Lei Lu, Xiangyang Ji, Jie Chen.
+     "RT-DETRv4: Painlessly Furthering Real-Time Object Detection with Vision Foundation Models"
+     arXiv preprint arXiv:2510.25257, 2025.
 
 2. AGAR Dataset (Annotated Germs for Automated Recognition)
-   Website: https://agar.neurosys.com/
-   Hugging Face: https://huggingface.co/datasets/leodriesch/agar
    License: Creative Commons Attribution-NonCommercial 2.0 Generic (CC BY-NC 2.0)
             (see licenses/LICENSE-AGAR-DATASET.txt)
    Copyright (c) NeuroSYS and University of Wrocław
@@ -26,14 +24,12 @@ Third-Party Software and Datasets Notice
      Majchrowska, S., Pawłowski, J., Guła, G., Bonnefond, T., Kostrzewa, A.,
      Pawlak, A., Derby, M. M., & Brzychczy, E.
      "AGAR a microbial colony dataset for deep learning detection."
-     Data in Brief, 39, 107641, 2021. https://doi.org/10.1016/j.dib.2021.107641
+     Data in Brief, 39, 107641, 2021.
    IMPORTANT COMPLIANCE NOTICE:
      The AGAR dataset is provided under the Creative Commons Attribution-NonCommercial
-     2.0 Generic license (CC BY-NC 2.0). Any derivative tiled datasets produced by the
-     preparation scripts (including 01-prepare-AGAR-dataset.ipynb) and any model weights
-     fine-tuned on the AGAR dataset (including 02-train-RT-DETRv2-colony-detection.ipynb)
-     are restricted to academic, educational, and non-commercial research use only.
-     The software code in this repository is licensed under Apache-2.0.
+     2.0 Generic license (CC BY-NC 2.0). Any derivative tiled datasets and any model weights
+     fine-tuned on the AGAR dataset are restricted to academic, educational, and
+     non-commercial research use only. The software code in this repository is licensed under Apache-2.0.
 
 3. SAHI (Slicing Aided Hyper Inference)
    Website: https://github.com/obss/sahi

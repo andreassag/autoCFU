@@ -64,4 +64,5 @@ Thumbs.db
 token.txt
 
 # Documentation & Guidelines
+docs/_build/
 !AGENTS.md

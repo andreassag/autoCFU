@@ -107,11 +107,29 @@ except ImportError:
                 return ArrayShim(item, shape=sub_shape, dtype=self.dtype) if isinstance(item, (list, tuple)) else item
             return self
 
+        def astype(self, dtype: Any) -> ArrayShim:
+            if isinstance(self._data, list):
+                conv = int if dtype is int or (hasattr(dtype, "name") and "int" in dtype.name) else float
+                return ArrayShim([conv(x) for x in self._data], shape=self.shape, dtype=dtype)
+            return self
+
         def __truediv__(self, other: Any) -> ArrayShim:
             return self
 
+        def copy(self) -> ArrayShim:
+            return ArrayShim(self._data, shape=self.shape, dtype=self.dtype)
+
         def __setitem__(self, key: Any, value: Any) -> None:
             pass
+
+    def _linspace(start: float, stop: float, num: int = 50) -> ArrayShim:
+        if num <= 0:
+            return ArrayShim([])
+        if num == 1:
+            return ArrayShim([float(start)])
+        step = (stop - start) / (num - 1)
+        vals = [start + step * i for i in range(num)]
+        return ArrayShim(vals)
 
     def _array(data: Any, dtype: Any = None) -> ArrayShim:
         if isinstance(data, ArrayShim):
@@ -124,6 +142,7 @@ except ImportError:
     setattr(np_mod, "ndarray", ArrayShim)
     setattr(np_mod, "array", _array)
     setattr(np_mod, "asarray", _array)
+    setattr(np_mod, "linspace", _linspace)
     setattr(
         np_mod,
         "zeros",

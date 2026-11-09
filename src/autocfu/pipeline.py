@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .config import EngineConfig, load_config
 from .merger import Detection, get_merger
-from .model import RTDetrV2ONNXModel
+from .model import RTDetrV4ONNXModel
 from .slicer import PlateSlicer
 
 
@@ -44,6 +44,16 @@ class InferenceResult:
     def scores(self) -> list[float]:
         """Return list of confidence scores."""
         return [d.score for d in self.detections]
+
+    @property
+    def inference_time_seconds(self) -> float:
+        """Convenience alias for execution_time_seconds."""
+        return self.execution_time_seconds
+
+    @property
+    def tile_count(self) -> int:
+        """Convenience alias for num_slices."""
+        return self.num_slices
 
     def to_numpy(self, include_score: bool = True) -> np.ndarray:
         """Export detections as a NumPy array of shape [N, 5] (x1, y1, x2, y2, score) or [N, 4]."""
@@ -211,7 +221,7 @@ class AutoCFUEngine:
         if model is not None:
             self.model = model
         elif model_path is not None:
-            self.model = RTDetrV2ONNXModel(
+            self.model = RTDetrV4ONNXModel(
                 model_path=model_path,
                 device=device,
                 input_size=self.config.slicing.slice_width,
@@ -253,14 +263,27 @@ class AutoCFUEngine:
                     class_name=self.config.inference.class_name,
                     intra_tile_nms_threshold=self.config.inference.intra_tile_nms_threshold,
                     intra_tile_match_metric=self.config.inference.intra_tile_match_metric,
+                    min_box_size=self.config.inference.min_box_size,
+                    max_box_size=self.config.inference.max_box_size,
+                    max_aspect_ratio=self.config.inference.max_aspect_ratio,
                 )
             except TypeError:
-                slice_dets = self.model.predict_slice(
-                    crop=crop,
-                    confidence_threshold=self.config.inference.confidence_threshold,
-                    target_class_id=self.config.inference.target_class_id,
-                    class_name=self.config.inference.class_name,
-                )
+                try:
+                    slice_dets = self.model.predict_slice(
+                        crop=crop,
+                        confidence_threshold=self.config.inference.confidence_threshold,
+                        target_class_id=self.config.inference.target_class_id,
+                        class_name=self.config.inference.class_name,
+                        intra_tile_nms_threshold=self.config.inference.intra_tile_nms_threshold,
+                        intra_tile_match_metric=self.config.inference.intra_tile_match_metric,
+                    )
+                except TypeError:
+                    slice_dets = self.model.predict_slice(
+                        crop=crop,
+                        confidence_threshold=self.config.inference.confidence_threshold,
+                        target_class_id=self.config.inference.target_class_id,
+                        class_name=self.config.inference.class_name,
+                    )
 
             # Translate slice coordinates into full-plate coordinate space
             for det in slice_dets:

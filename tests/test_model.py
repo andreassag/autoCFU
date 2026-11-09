@@ -1,4 +1,4 @@
-"""Unit tests for RTDetrV2ONNXModel session wrapper and provider resolution."""
+"""Unit tests for RTDetrV4ONNXModel session wrapper and provider resolution."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any, Sequence
 import numpy as np
 from PIL import Image
 
-from autocfu.model import RTDetrONNXModel, RTDetrV2ONNXModel, RTDetrV4ONNXModel
+from autocfu.model import RTDetrONNXModel, RTDetrV2ONNXModel, RTDetrV4ONNXModel, _find_output_tensor
 
 try:
     import onnxruntime as _ort
@@ -33,11 +33,12 @@ class MockSession:
         self,
         input_names: Sequence[str] = ("images", "orig_target_sizes"),
         output_names: Sequence[str] = ("labels", "boxes", "scores"),
-        outputs: list[np.ndarray] | None = None,
+        outputs: Sequence[np.ndarray] | None = None,
     ) -> None:
         self.input_nodes = [MockNode(n) for n in input_names]
         self.output_nodes = [MockNode(n) for n in output_names]
         self.last_feed_dict: dict[str, Any] = {}
+        self.outputs: Sequence[np.ndarray]
 
         if outputs is not None:
             self.outputs = outputs
@@ -57,7 +58,7 @@ class MockSession:
     def get_providers(self) -> list[str]:
         return ["CPUExecutionProvider"]
 
-    def run(self, output_names: Any, feed_dict: dict[str, Any]) -> list[np.ndarray]:
+    def run(self, output_names: Any, feed_dict: dict[str, Any]) -> Sequence[np.ndarray]:
         self.last_feed_dict = feed_dict
         return self.outputs
 
@@ -161,9 +162,9 @@ class TestRTDetrV2ONNXModel(unittest.TestCase):
         self.assertAlmostEqual(by2, 80.0)  # 320 * 0.25
 
     def test_model_aliases(self) -> None:
-        """Verify that RTDetrONNXModel and RTDetrV4ONNXModel alias RTDetrV2ONNXModel."""
-        self.assertIs(RTDetrONNXModel, RTDetrV2ONNXModel)
-        self.assertIs(RTDetrV4ONNXModel, RTDetrV2ONNXModel)
+        """Verify that RTDetrONNXModel and RTDetrV2ONNXModel alias RTDetrV4ONNXModel."""
+        self.assertIs(RTDetrONNXModel, RTDetrV4ONNXModel)
+        self.assertIs(RTDetrV2ONNXModel, RTDetrV4ONNXModel)
 
     def test_coordinate_clamping(self) -> None:
         """Verify predicted coordinates outside slice bounds are clamped to [0, orig_w/h]."""
@@ -228,6 +229,66 @@ class TestRTDetrV2ONNXModel(unittest.TestCase):
         )
         self.assertEqual(len(dets_unsuppressed), 2)
 
+    def test_geometric_filtering(self) -> None:
+        """Verify min_box_size, max_box_size, and max_aspect_ratio filtering."""
+        labels = np.array([0, 0, 0, 0], dtype=np.int64)
+        boxes = np.array(
+            [
+                [
+                    [10.0, 10.0, 14.0, 14.0],  # 4x4: too small if min_box_size=6.0
+                    [20.0, 20.0, 50.0, 50.0],  # 30x30: valid
+                    [100.0, 100.0, 450.0, 450.0],  # 350x350: too large if max_box_size=300.0
+                    [50.0, 50.0, 60.0, 90.0],  # 10x40 (aspect ratio 4.0): invalid if max_aspect_ratio=2.5
+                ]
+            ],
+            dtype=np.float32,
+        )
+        scores = np.array([[0.9, 0.9, 0.9, 0.9]], dtype=np.float32)
+
+        mock_sess = MockSession(outputs=[labels, boxes, scores])
+        model = RTDetrV4ONNXModel(session=mock_sess, input_size=640)
+        img = Image.new("RGB", (640, 640))
+
+        # Filter with min_box_size
+        dets_min = model.predict_slice(img, min_box_size=6.0)
+        self.assertEqual(len(dets_min), 3)
+
+        # Filter with max_box_size
+        dets_max = model.predict_slice(img, max_box_size=300.0)
+        self.assertEqual(len(dets_max), 3)
+
+        # Filter with max_aspect_ratio
+        dets_aspect = model.predict_slice(img, max_aspect_ratio=2.5)
+        self.assertEqual(len(dets_aspect), 3)
+
+        # All filters combined: only the 30x30 box remains
+        dets_all = model.predict_slice(img, min_box_size=6.0, max_box_size=300.0, max_aspect_ratio=2.5)
+        self.assertEqual(len(dets_all), 1)
+        self.assertEqual(dets_all[0].bbox, (20.0, 20.0, 50.0, 50.0))
+
+    def test_rim_glare_border_suppression(self) -> None:
+        """Verify elongated slivers along tile boundaries are rejected when max_aspect_ratio > 0."""
+        labels = np.array([0, 0, 0], dtype=np.int64)
+        boxes = np.array(
+            [
+                [
+                    [0.0, 100.0, 8.0, 140.0],  # Border sliver: bx1=0, max(bw, bh)=40 > 20, aspect_ratio=5.0 > 1.8
+                    [1.5, 200.0, 9.5, 240.0],  # Border sliver within 2.0px margin: bx1=1.5
+                    [100.0, 100.0, 120.0, 120.0],  # Normal colony
+                ]
+            ],
+            dtype=np.float32,
+        )
+        scores = np.array([[0.9, 0.9, 0.9]], dtype=np.float32)
+
+        mock_sess = MockSession(outputs=[labels, boxes, scores])
+        model = RTDetrV4ONNXModel(session=mock_sess, input_size=640)
+        img = Image.new("RGB", (640, 640))
+
+        dets = model.predict_slice(img, max_aspect_ratio=2.5)
+        self.assertEqual(len(dets), 1)
+        self.assertEqual(dets[0].bbox, (100.0, 100.0, 120.0, 120.0))
+
     @unittest.skipIf(ort is None, "onnxruntime is not installed")
     def test_real_onnx_model_loading(self) -> None:
         """Test loading a real physical ONNX model file from disk."""
@@ -238,6 +299,105 @@ class TestRTDetrV2ONNXModel(unittest.TestCase):
             model = RTDetrV2ONNXModel(model_path=bundled_onnx, device="cpu")
             self.assertEqual(model.active_provider, "CPUExecutionProvider")
             self.assertIn("X", model._input_names)
+
+    def test_find_output_tensor_with_sequence(self) -> None:
+        """Verify _find_output_tensor correctly handles candidate lookup and Sequence fallback."""
+        arr0 = np.array([0, 1])
+        arr1 = np.array([[10, 20, 30, 40]])
+        arr2 = np.array([0.9])
+        raw_tuple: Sequence[np.ndarray] = (arr0, arr1, arr2)
+
+        # Candidate match in output_dict
+        d = {"labels": arr0}
+        self.assertIs(_find_output_tensor(d, raw_tuple, ["labels"], 1), arr0)
+
+        # Fallback to index when candidate not found
+        d_other = {"something_else": arr0}
+        self.assertIs(_find_output_tensor(d_other, raw_tuple, ["boxes", "bboxes"], 1), arr1)
+
+        # Fallback to index 0 when fallback_index exceeds sequence length
+        self.assertIs(_find_output_tensor(d_other, raw_tuple, ["scores"], 99), arr0)
+
+    def test_predict_slice_with_tuple_sequence_outputs(self) -> None:
+        """Verify predict_slice succeeds when session returns a tuple of outputs (Sequence)."""
+        labels = np.array([[0]], dtype=np.int64)
+        boxes = np.array([[[10.0, 10.0, 50.0, 50.0]]], dtype=np.float32)
+        scores = np.array([[0.95]], dtype=np.float32)
+
+        # MockSession initialized with tuple of outputs instead of list
+        mock_sess = MockSession(outputs=(labels, boxes, scores))
+        model = RTDetrV4ONNXModel(session=mock_sess, input_size=640)
+
+        img = Image.new("RGB", (640, 640))
+        dets = model.predict_slice(img)
+        self.assertEqual(len(dets), 1)
+        self.assertEqual(dets[0].bbox, (10.0, 10.0, 50.0, 50.0))
+        self.assertAlmostEqual(dets[0].score, 0.95)
+
+    def test_find_output_tensor_case_insensitivity_and_none(self) -> None:
+        """Verify _find_output_tensor handles case mismatch and skips None candidate values."""
+        arr0 = np.array([0, 1])
+        arr1 = np.array([[10, 20, 30, 40]])
+        raw_tuple: Sequence[np.ndarray] = (arr0, arr1)
+
+        # Case-insensitive match when dictionary has uppercase key and candidate is lowercase
+        d_upper = {"Labels": arr0}
+        self.assertIs(_find_output_tensor(d_upper, raw_tuple, ["labels"], 1), arr0)
+
+        # Case-insensitive match when dictionary has lowercase key and candidate is uppercase
+        d_lower = {"labels": arr0}
+        self.assertIs(_find_output_tensor(d_lower, raw_tuple, ["LABELS"], 1), arr0)
+
+        # Skip None candidate and fall back to next candidate or positional index
+        d_none = {"labels": None, "pred_labels": arr0}
+        self.assertIs(_find_output_tensor(d_none, raw_tuple, ["labels", "pred_labels"], 1), arr0)
+
+        d_only_none = {"labels": None}
+        self.assertIs(_find_output_tensor(d_only_none, raw_tuple, ["labels"], 1), arr1)
+
+    def test_find_output_tensor_empty_and_negative_indices(self) -> None:
+        """Verify _find_output_tensor error handling for empty sequences and negative indices."""
+        arr0 = np.array([0, 1])
+
+        # Negative fallback_index defaults to index 0 safely
+        self.assertIs(_find_output_tensor({}, (arr0,), ["labels"], -1), arr0)
+
+        # Empty sequence with no candidate match raises ValueError
+        with self.assertRaises(ValueError):
+            _find_output_tensor({}, (), ["labels"], 0)
+
+    def test_predict_slice_zero_size_image(self) -> None:
+        """Verify predict_slice gracefully returns empty detections for zero-dimension image."""
+        mock_sess = MockSession()
+        model = RTDetrV4ONNXModel(session=mock_sess, input_size=640)
+
+        # PIL Image with 0 width
+        zero_w_img = Image.new("RGB", (0, 640))
+        self.assertEqual(model.predict_slice(zero_w_img), [])
+
+        # PIL Image with 0 height
+        zero_h_img = Image.new("RGB", (640, 0))
+        self.assertEqual(model.predict_slice(zero_h_img), [])
+
+    def test_duck_typed_session_without_input_output_methods(self) -> None:
+        """Verify RTDetrV4ONNXModel operates with minimal duck-typed session missing get_inputs/get_outputs."""
+        labels = np.array([[0]], dtype=np.int64)
+        boxes = np.array([[[10.0, 10.0, 50.0, 50.0]]], dtype=np.float32)
+        scores = np.array([[0.95]], dtype=np.float32)
+
+        class MinimalSession:
+            def run(self, output_names: Any, feed_dict: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                return (labels, boxes, scores)
+
+        minimal_sess = MinimalSession()
+        model = RTDetrV4ONNXModel(session=minimal_sess, input_size=640)
+        self.assertEqual(model._input_names, ["images"])
+        self.assertEqual(model._output_names, [])
+
+        img = Image.new("RGB", (640, 640))
+        dets = model.predict_slice(img)
+        self.assertEqual(len(dets), 1)
+        self.assertEqual(dets[0].bbox, (10.0, 10.0, 50.0, 50.0))
 
 
 if __name__ == "__main__":

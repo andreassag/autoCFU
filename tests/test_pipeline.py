@@ -46,11 +46,17 @@ class TestPipeline(unittest.TestCase):
             cfg = EngineConfig()
             cfg.slicing.slice_width = 500
             cfg.inference.confidence_threshold = 0.42
+            cfg.inference.min_box_size = 6.0
+            cfg.inference.max_box_size = 300.0
+            cfg.inference.max_aspect_ratio = 2.5
             cfg.save_yaml(yaml_path)
 
             loaded = load_config(yaml_path)
             self.assertEqual(loaded.slicing.slice_width, 500)
             self.assertAlmostEqual(loaded.inference.confidence_threshold, 0.42)
+            self.assertAlmostEqual(loaded.inference.min_box_size, 6.0)
+            self.assertAlmostEqual(loaded.inference.max_box_size, 300.0)
+            self.assertAlmostEqual(loaded.inference.max_aspect_ratio, 2.5)
 
     def test_pipeline_with_mock_model(self) -> None:
         # Define mock detection inside slice coordinates (e.g., at [10, 10, 30, 30])

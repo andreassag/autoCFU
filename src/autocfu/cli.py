@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         required=True,
-        help="Path to the exported RT-DETRv2 ONNX model file.",
+        help="Path to the exported RT-DETRv4 ONNX model file.",
     )
     parser.add_argument(
         "--config",
@@ -114,6 +114,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override intra-tile match metric (iou or ios).",
     )
     parser.add_argument(
+        "--min-box-size",
+        type=float,
+        default=None,
+        help="Override minimum box width and height in pixels (e.g. 6.0, 0 to disable).",
+    )
+    parser.add_argument(
+        "--max-box-size",
+        type=float,
+        default=None,
+        help="Override maximum box width and height in pixels (e.g. 300.0, 0 to disable).",
+    )
+    parser.add_argument(
+        "--max-aspect-ratio",
+        type=float,
+        default=None,
+        help="Override maximum allowed aspect ratio max(w/h, h/w) (e.g. 2.5, 0 to disable).",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="auto",
@@ -164,6 +182,12 @@ def main(args_list: list[str] | None = None) -> int:
         config.inference.intra_tile_nms_threshold = args.intra_tile_threshold
     if args.intra_tile_metric is not None:
         config.inference.intra_tile_match_metric = args.intra_tile_metric
+    if args.min_box_size is not None:
+        config.inference.min_box_size = args.min_box_size
+    if args.max_box_size is not None:
+        config.inference.max_box_size = args.max_box_size
+    if args.max_aspect_ratio is not None:
+        config.inference.max_aspect_ratio = args.max_aspect_ratio
 
     # 2. Gather image paths
     image_paths: list[Path] = []

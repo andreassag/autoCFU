@@ -41,6 +41,9 @@ class InferenceConfig:
     match_metric: str = "ios"  # Options: 'iou', 'ios'
     intra_tile_nms_threshold: float = 0.45
     intra_tile_match_metric: str = "ios"  # Options: 'iou', 'ios'
+    min_box_size: float = 0.0
+    max_box_size: float = 0.0
+    max_aspect_ratio: float = 0.0
     target_class_id: int = 0
     class_name: str = "colony"
 
@@ -68,6 +71,9 @@ class EngineConfig:
                 "match_metric": self.inference.match_metric,
                 "intra_tile_nms_threshold": self.inference.intra_tile_nms_threshold,
                 "intra_tile_match_metric": self.inference.intra_tile_match_metric,
+                "min_box_size": self.inference.min_box_size,
+                "max_box_size": self.inference.max_box_size,
+                "max_aspect_ratio": self.inference.max_aspect_ratio,
                 "target_class_id": self.inference.target_class_id,
                 "class_name": self.inference.class_name,
             },
@@ -118,6 +124,9 @@ def load_config(config_source: str | Path | dict[str, Any] | None = None) -> Eng
         match_metric=str(inference_data.get("match_metric", "ios")),
         intra_tile_nms_threshold=float(inference_data.get("intra_tile_nms_threshold", 0.45)),
         intra_tile_match_metric=str(inference_data.get("intra_tile_match_metric", "ios")),
+        min_box_size=float(inference_data.get("min_box_size", 0.0)),
+        max_box_size=float(inference_data.get("max_box_size", 0.0)),
+        max_aspect_ratio=float(inference_data.get("max_aspect_ratio", 0.0)),
         target_class_id=int(inference_data.get("target_class_id", 0)),
         class_name=str(inference_data.get("class_name", "colony")),
     )

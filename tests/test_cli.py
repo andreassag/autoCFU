@@ -42,6 +42,12 @@ class TestCLI(unittest.TestCase):
                 "0.40",
                 "--intra-tile-metric",
                 "ios",
+                "--min-box-size",
+                "6.0",
+                "--max-box-size",
+                "300.0",
+                "--max-aspect-ratio",
+                "2.5",
                 "--device",
                 "cpu",
                 "--save-overlay",
@@ -59,6 +65,9 @@ class TestCLI(unittest.TestCase):
         self.assertAlmostEqual(args.match_threshold, 0.60)
         self.assertAlmostEqual(args.intra_tile_threshold, 0.40)
         self.assertEqual(args.intra_tile_metric, "ios")
+        self.assertAlmostEqual(args.min_box_size, 6.0)
+        self.assertAlmostEqual(args.max_box_size, 300.0)
+        self.assertAlmostEqual(args.max_aspect_ratio, 2.5)
         self.assertEqual(args.device, "cpu")
         self.assertTrue(args.save_overlay)
         self.assertTrue(args.save_json)

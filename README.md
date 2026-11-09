@@ -1,12 +1,12 @@
 # AutoCFU: High-Resolution Microbial Colony Detection & Counting
 
-An automated, high-resolution colony detection and enumeration system for microbiological Petri dishes using **RT-DETRv2 / RT-DETRv4** and **Slicing-Aided Hyper Inference (SAHI / GreedyNMM)**.
+An automated, high-resolution colony detection and enumeration system for microbiological Petri dishes using **RT-DETRv4** and **Slicing-Aided Hyper Inference (SAHI / GreedyNMM)**.
 
 ---
 
 ## Architecture & Repository Organization
 
-Full-dish agar photography typically captures Petri dishes at 4000×4000 resolution. Direct downscaling reduces minute colonies (<15 pixels) to unrecognizable noise. This repository hosts the decoupled, production-grade Python inference engine and CLI. Dataset preparation, fine-tuning, and benchmarking are hosted in the companion repository [autoCFU-training](https://github.com/andreassag/autoCFU-training).
+Full-dish agar photography typically captures Petri dishes at 4000×4000 resolution. Direct downscaling reduces minute colonies (<15 pixels) to unrecognizable noise. This repository hosts the standalone, production-grade Python inference engine and CLI for sliced inference and automated colony enumeration.
 
 ```
 autoCFU/
@@ -14,7 +14,16 @@ autoCFU/
 │   ├── dependabot.yml           # Automated weekly dependency updates (pip & GitHub Actions)
 │   └── workflows/
 │       ├── ci.yml               # Multi-version CI matrix (Python 3.10, 3.11, 3.12)
-│       └── dependabot-auto-merge.yml
+│       ├── dependabot-auto-merge.yml
+│       └── docs.yml             # GitHub Pages documentation deployment workflow
+│
+├── docs/                        # Sphinx Documentation Suite (Furo theme)
+│   ├── conf.py                  # Sphinx build configuration
+│   ├── index.rst                # Master documentation landing page
+│   ├── installation.rst         # Installation, setup, & ONNX provider guide
+│   ├── cli.rst                  # CLI user guide & argument reference
+│   ├── python_api.rst           # Python API examples & spatial filtering
+│   └── api/                     # Autodoc module reference pages
 │
 ├── src/autocfu/                 # Standalone Python Inference Engine
 │   ├── __init__.py              # Public exports
@@ -23,6 +32,7 @@ autoCFU/
 │   ├── merger.py                # Greedy Non-Maximum Merging (GreedyNMM & NMS)
 │   ├── model.py                 # ONNX Runtime session manager (CUDA & CPU)
 │   ├── pipeline.py              # Full-plate end-to-end sliced inference orchestrator
+│   ├── utils.py                 # Ground-truth extraction, streaming & visualization helpers
 │   └── cli.py                   # autocfu CLI entrypoint
 │
 ├── tests/                       # Unit Test Suite
@@ -30,6 +40,7 @@ autoCFU/
 │   ├── test_merger.py           # IoU and weighted coordinate clustering tests
 │   ├── test_model.py            # ONNX session unbatching & provider tests
 │   ├── test_pipeline.py         # Pipeline mock runner & serialization tests
+│   ├── test_utils.py            # Dataset streaming, GT extraction & metrics tests
 │   └── test_cli.py              # CLI argument parsing & execution tests
 │
 ├── configs/
@@ -40,7 +51,7 @@ autoCFU/
 │
 ├── licenses/                    # Upstream and repository licenses
 │   ├── LICENSE-APACHE-2.0.txt
-│   ├── LICENSE-RT-DETRv2.txt    # RT-DETRv2 Apache-2.0 License
+│   ├── LICENSE-RT-DETRv4.txt    # RT-DETR Apache-2.0 License
 │   ├── LICENSE-AGAR-DATASET.txt # AGAR Dataset CC BY-NC 2.0 License
 │   └── LICENSE-SAHI.txt         # SAHI MIT License
 ├── scripts/                     # Developer utility scripts (dependency upgrades)
@@ -83,8 +94,11 @@ make typecheck
 # Format Python code (ruff)
 make format
 
-# Run pre-commit checks across all files
-make pre-commit
+# Build Sphinx HTML documentation
+make docs
+
+# Clean Sphinx build artifacts
+make docs-clean
 
 # Simulate GitHub Actions CI locally
 make act
@@ -102,13 +116,13 @@ make update-deps
 ```bash
 # Sliced inference on a single Petri dish with visual overlay
 autocfu --image path/to/plate.jpg \
-        --model models/rtdetrv2_r18vd_agar_640.onnx \
+        --model models/rtdetrv4_r18vd_640.onnx \
         --output-dir results/ \
         --save-overlay
 
 # Batch process an entire directory and export summary CSV
 autocfu --input-dir path/to/plates/ \
-        --model models/rtdetrv2_r18vd_agar_640.onnx \
+        --model models/rtdetrv4_r18vd_640.onnx \
         --output-dir results/ \
         --save-csv \
         --save-json
@@ -119,7 +133,7 @@ autocfu --input-dir path/to/plates/ \
 ### CLI Options
 - `--image`: Path to single plate image file.
 - `--input-dir`: Directory containing images to process.
-- `--model`: Path to exported RT-DETR ONNX model.
+- `--model`: Path to exported RT-DETRv4 ONNX model.
 - `--config`: Path to YAML configuration (default: `configs/default_inference.yaml` if present).
 - `--confidence`: Detection score threshold (overrides config, default `0.35`).
 - `--overlap`: Overlap ratio between adjacent tiles (overrides config, default `0.20`).
@@ -142,10 +156,7 @@ from autocfu import AutoCFUEngine, load_config
 config = load_config("configs/default_inference.yaml")
 
 # Initialize engine with your trained ONNX model
-engine = AutoCFUEngine(
-    model_path="models/rtdetrv2_r18vd_agar_640.onnx",
-    config=config
-)
+engine = AutoCFUEngine(model_path="models/rtdetrv4_r18vd_640.onnx", config=config)
 
 # Run full-plate inference
 result = engine.infer_image("plate.jpg")
@@ -159,14 +170,12 @@ result.draw_overlay(output_path="results/plate_annotated.jpg")
 
 ---
 
-## Research & Training Pipeline
+## Model Deployment & ONNX Export
 
-Model training, dataset preparation, and evaluation pipelines are maintained in the companion repository:
-- **Repository**: [autoCFU-training](https://github.com/andreassag/autoCFU-training)
-- **Features**:
-  - Google Colab notebooks for AGAR dataset streaming, 640×640 COCO tiling, and RT-DETRv4 / RT-DETRv2 fine-tuning.
-  - Pure-Python training and benchmarking pipeline with PyTorch TensorBoard dashboard integration.
-  - ONNX export scripts to generate models for this inference engine.
+The `autoCFU` inference engine operates independently from model training pipelines:
+- **Architecture**: Optimized for RT-DETRv4 colony detection models with Slicing-Aided Hyper Inference (SAHI).
+- **ONNX Compatibility**: Accepts standard exported ONNX models conforming to the input and output tensor contracts detailed in [models/README.md](models/README.md).
+- **Lightweight Runtime**: Runs purely on ONNX Runtime without requiring PyTorch, CUDA toolchains, or heavy training dependencies during deployment.
 
 ---
 
@@ -175,8 +184,8 @@ Model training, dataset preparation, and evaluation pipelines are maintained in 
 - **Software Code**: Licensed under the [Apache License, Version 2.0](LICENSE).
 - **AGAR Dataset & Derived Model Weights**:
   The AGAR dataset is provided under **Creative Commons Attribution-NonCommercial 2.0 Generic (CC BY-NC 2.0)**.
-  - Any tiled dataset derivatives generated by `01-prepare-AGAR-dataset.ipynb` and any model weights fine-tuned on AGAR (including weights placed in `models/`) are restricted to **academic, educational, and non-commercial research use only**.
+  - Any model weights fine-tuned on AGAR (including weights placed in `models/`) are restricted to **academic, educational, and non-commercial research use only**.
   - See [NOTICE](NOTICE) and [licenses/LICENSE-AGAR-DATASET.txt](licenses/LICENSE-AGAR-DATASET.txt) for complete details.
 - **Upstream Attributions**:
-  - **RT-DETRv2**: Apache-2.0 License, Copyright (c) 2024 lyuwenyu.
+  - **RT-DETR / RT-DETRv4**: Apache-2.0 License, Copyright (c) 2025 The RT-DETRv4 Authors.
   - **SAHI**: MIT License, Copyright (c) 2021 Fatih Cagatay Akyon.

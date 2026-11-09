@@ -60,10 +60,10 @@ jobs:
       - name: Install package and dependencies
         run: |
           if command -v uv >/dev/null 2>&1; then
-            uv pip install --system -e ".[dev]"
+            uv pip install --system -e ".[dev,docs]"
           else
             python -m pip install --upgrade pip
-            python -m pip install -e ".[dev]"
+            python -m pip install -e ".[dev,docs]"
           fi
 
       - name: Check code formatting (ruff)
@@ -81,6 +81,10 @@ jobs:
       - name: Run unit tests (pytest)
         run: |
           pytest tests/
+
+      - name: Build Sphinx documentation
+        run: |
+          sphinx-build -b html -W docs docs/_build/html
 
   dependabot-automerge:
     name: Dependabot Auto-Merge (Post-CI)
