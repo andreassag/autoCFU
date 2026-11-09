@@ -38,6 +38,14 @@ class TestUtils(unittest.TestCase):
         arr_valid = np.zeros((3200, 3200, 3), dtype=np.uint8)
         self.assertTrue(is_valid_highres_plate({"image": arr_valid, "colonies_number": 10}))
 
+        # Valid sample with 2D grayscale numpy array
+        arr_2d_valid = np.zeros((3200, 3200), dtype=np.uint8)
+        self.assertTrue(is_valid_highres_plate({"image": arr_2d_valid, "colonies_number": 10}))
+
+        # Invalid: 1D array
+        arr_1d = np.zeros(3200, dtype=np.uint8)
+        self.assertFalse(is_valid_highres_plate({"image": arr_1d, "colonies_number": 10}))
+
         # Valid with string count and None count
         self.assertTrue(is_valid_highres_plate({"image": img_valid, "colonies_number": "10"}))
         self.assertTrue(is_valid_highres_plate({"image": img_valid, "colonies_number": None}))

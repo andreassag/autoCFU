@@ -76,10 +76,10 @@ def is_valid_highres_plate(sample: dict[str, Any], min_dim: int = 3000) -> bool:
     if img is None:
         return False
 
-    if hasattr(img, "size"):
-        w, h = img.size
-    elif hasattr(img, "shape"):
-        h, w = img.shape[:2]
+    if hasattr(img, "shape") and hasattr(img.shape, "__len__") and len(img.shape) >= 2:
+        h, w = int(img.shape[0]), int(img.shape[1])
+    elif hasattr(img, "size") and isinstance(img.size, (tuple, list)) and len(img.size) >= 2:
+        w, h = int(img.size[0]), int(img.size[1])
     else:
         return False
 
