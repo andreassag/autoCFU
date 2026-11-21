@@ -4,8 +4,8 @@ build-backend = "uv_build"
 
 [project]
 name = "autocfu"
-version = "0.1.1"
-description = "AutoCFU: High-resolution sliced inference engine for microbial colony detection and counting"
+version = "0.2.0"
+description = "Standalone ONNX inference engine for Petri dish colony detection (CenterNet), instance segmentation (2D StarDist), and countability classification."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}

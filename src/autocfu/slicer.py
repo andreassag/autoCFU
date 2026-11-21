@@ -12,7 +12,14 @@ from .config import SlicingConfig
 
 @dataclass(frozen=True)
 class SliceWindow:
-    """Represents a rectangular crop window in absolute image coordinates."""
+    """Rectangular crop window in absolute image pixel coordinates.
+
+    Attributes:
+        xmin: Left edge coordinate (inclusive) in pixels.
+        ymin: Top edge coordinate (inclusive) in pixels.
+        xmax: Right edge coordinate (exclusive) in pixels.
+        ymax: Bottom edge coordinate (exclusive) in pixels.
+    """
 
     xmin: int
     ymin: int
@@ -21,14 +28,17 @@ class SliceWindow:
 
     @property
     def width(self) -> int:
+        """Tile width in pixels."""
         return self.xmax - self.xmin
 
     @property
     def height(self) -> int:
+        """Tile height in pixels."""
         return self.ymax - self.ymin
 
     @property
     def bbox(self) -> tuple[int, int, int, int]:
+        """Window bounds formatted as ``(xmin, ymin, xmax, ymax)``."""
         return (self.xmin, self.ymin, self.xmax, self.ymax)
 
 
@@ -44,6 +54,19 @@ class PlateSlicer:
         *,
         overlap_ratio: float | None = None,
     ) -> None:
+        """Initialize the 2D sliding-window tile generator.
+
+        Args:
+            slice_width: Width of each crop tile in pixels.
+            slice_height: Height of each crop tile in pixels.
+            overlap_width_ratio: Fractional horizontal overlap in ``[0.0, 1.0)``.
+            overlap_height_ratio: Fractional vertical overlap in ``[0.0, 1.0)``.
+            overlap_ratio: Optional symmetric overlap override applied to both axes.
+
+        Raises:
+            ValueError: If tile dimensions are non-positive or overlap ratios lie
+                outside ``[0.0, 1.0)``.
+        """
         if overlap_ratio is not None:
             overlap_width_ratio = overlap_ratio
             overlap_height_ratio = overlap_ratio
@@ -62,6 +85,7 @@ class PlateSlicer:
 
     @classmethod
     def from_config(cls, config: SlicingConfig) -> PlateSlicer:
+        """Construct a :class:`PlateSlicer` from a :class:`SlicingConfig` instance."""
         return cls(
             slice_width=config.slice_width,
             slice_height=config.slice_height,
@@ -88,7 +112,18 @@ class PlateSlicer:
         return intervals
 
     def get_slice_windows(self, image_width: int, image_height: int) -> list[SliceWindow]:
-        """Compute all 2D slice windows covering the given image dimensions."""
+        """Compute all 2D slice windows covering the given image dimensions.
+
+        Args:
+            image_width: Full image width in pixels.
+            image_height: Full image height in pixels.
+
+        Returns:
+            Row-major list of :class:`SliceWindow` crop bounds.
+
+        Raises:
+            ValueError: If ``image_width`` or ``image_height`` is non-positive.
+        """
         if image_width <= 0 or image_height <= 0:
             raise ValueError("Image dimensions must be positive.")
 
@@ -105,10 +140,17 @@ class PlateSlicer:
         self,
         image: np.ndarray | Image.Image,
     ) -> list[tuple[SliceWindow, np.ndarray]]:
-        """Slice an image into cropped numpy array tiles with their slice coordinates.
+        """Slice an image into cropped RGB NumPy tiles paired with window bounds.
+
+        Args:
+            image: Input dish image as a PIL image or RGB NumPy array.
 
         Returns:
-            list[tuple[SliceWindow, np.ndarray]]: List of (SliceWindow, cropped_tile_as_numpy_rgb) pairs.
+            List of ``(SliceWindow, tile_array)`` tuples in row-major order.
+
+        Raises:
+            TypeError: If ``image`` is neither a :class:`PIL.Image.Image` nor a
+                :class:`numpy.ndarray`.
         """
         if isinstance(image, Image.Image):
             width, height = image.size

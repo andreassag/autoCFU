@@ -1,13 +1,50 @@
-"""AutoCFU: High-resolution sliced microbial colony detection engine."""
+"""AutoCFU standalone multi-model ONNX inference engine."""
 
 from __future__ import annotations
 
-from .config import EngineConfig, InferenceConfig, SlicingConfig, load_config
-from .merger import NMS, Detection, GreedyNMM, calculate_ios, calculate_iou, get_merger
-from .model import RTDetrONNXModel, RTDetrV2ONNXModel, RTDetrV4ONNXModel
-from .pipeline import AgarInferenceEngine, AutoCFUEngine, InferenceResult, export_batch_summary_csv
-from .slicer import PlateSlicer, SliceWindow
-from .utils import (
+from autocfu.config import (
+    VALID_COUNTABILITY_SCOPES,
+    VALID_DEVICES,
+    VALID_MATCH_METRICS,
+    VALID_MERGER_TYPES,
+    VALID_MODEL_TYPES,
+    EngineConfig,
+    InferenceConfig,
+    SlicingConfig,
+    load_config,
+)
+from autocfu.merger import (
+    NMS,
+    Detection,
+    GreedyNMM,
+    calculate_center_distance_ratio,
+    calculate_ios,
+    calculate_iou,
+    detections_match,
+    get_merger,
+    reconstruct_star_polygon,
+)
+from autocfu.model import (
+    COUNTABILITY_LABELS,
+    AnyONNXModel,
+    BaseONNXModel,
+    CenterNetONNXModel,
+    CountabilityONNXModel,
+    CountabilityResult,
+    StarDistONNXModel,
+    detect_onnx_model_type,
+    load_model,
+    load_onnx_model,
+)
+from autocfu.pipeline import (
+    IMAGE_EXTENSIONS,
+    AutoCFUEngine,
+    InferenceResult,
+    PlateCountabilityReport,
+    export_batch_summary_csv,
+)
+from autocfu.slicer import PlateSlicer, SliceWindow
+from autocfu.utils import (
     IGNORED_CATEGORIES,
     KNOWN_COLONY_LABELS,
     compute_detection_metrics,
@@ -18,34 +55,51 @@ from .utils import (
     stream_sample_plate,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
+    "__version__",
+    "COUNTABILITY_LABELS",
+    "IGNORED_CATEGORIES",
+    "IMAGE_EXTENSIONS",
+    "KNOWN_COLONY_LABELS",
+    "VALID_COUNTABILITY_SCOPES",
+    "VALID_DEVICES",
+    "VALID_MATCH_METRICS",
+    "VALID_MERGER_TYPES",
+    "VALID_MODEL_TYPES",
+    "AnyONNXModel",
     "AutoCFUEngine",
-    "AgarInferenceEngine",
+    "BaseONNXModel",
+    "CenterNetONNXModel",
+    "CountabilityONNXModel",
+    "CountabilityResult",
+    "Detection",
+    "EngineConfig",
+    "GreedyNMM",
+    "InferenceConfig",
     "InferenceResult",
+    "NMS",
+    "PlateCountabilityReport",
     "PlateSlicer",
     "SliceWindow",
-    "GreedyNMM",
-    "NMS",
-    "Detection",
-    "calculate_iou",
-    "calculate_ios",
-    "get_merger",
-    "RTDetrV4ONNXModel",
-    "RTDetrONNXModel",
-    "RTDetrV2ONNXModel",
-    "EngineConfig",
     "SlicingConfig",
-    "InferenceConfig",
-    "load_config",
-    "export_batch_summary_csv",
-    "IGNORED_CATEGORIES",
-    "KNOWN_COLONY_LABELS",
+    "StarDistONNXModel",
+    "calculate_center_distance_ratio",
+    "calculate_ios",
+    "calculate_iou",
     "compute_detection_metrics",
+    "detect_onnx_model_type",
+    "detections_match",
+    "export_batch_summary_csv",
     "extract_gt_colony_boxes",
+    "get_merger",
     "is_colony_label",
     "is_valid_highres_plate",
+    "load_config",
+    "load_model",
+    "load_onnx_model",
     "plot_plate_detections",
+    "reconstruct_star_polygon",
     "stream_sample_plate",
 ]

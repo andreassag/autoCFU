@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - develop
     paths-ignore:
       - "docs/**"
-      - "notebooks/**"
       - "**/*.md"
-      - "*.md"
       - "LICENSE*"
       - "NOTICE*"
       - "licenses/**"
@@ -16,12 +16,12 @@ on:
       - ".pre-commit-config.yaml"
       - "models/**"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - develop
     paths-ignore:
       - "docs/**"
-      - "notebooks/**"
       - "**/*.md"
-      - "*.md"
       - "LICENSE*"
       - "NOTICE*"
       - "licenses/**"
@@ -30,13 +30,12 @@ on:
       - ".pre-commit-config.yaml"
       - "models/**"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
   test:
-    name: Test & Lint (Python ${{ matrix.python-version }})
+    name: Python (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -44,7 +43,7 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -52,53 +51,68 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install uv
+      - name: Set up uv
         uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
 
-      - name: Install package and dependencies
-        run: |
-          if command -v uv >/dev/null 2>&1; then
-            uv pip install --system -e ".[dev,docs]"
-          else
-            python -m pip install --upgrade pip
-            python -m pip install -e ".[dev,docs]"
-          fi
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev,docs]"
 
-      - name: Check code formatting (ruff)
-        run: |
-          ruff format --check src/ tests/
+      - name: Verify formatting
+        run: ruff format --check src/ tests/
 
-      - name: Lint codebase (ruff)
-        run: |
-          ruff check src/ tests/
+      - name: Run ruff linter
+        run: ruff check src/ tests/
 
-      - name: Type-check codebase (ty)
-        run: |
-          ty check src/ tests/
+      - name: Run ty static type checker
+        run: ty check src/ tests/
 
-      - name: Run unit tests (pytest)
-        run: |
-          pytest tests/
+      - name: Run pytest suite
+        run: pytest tests/ -v
 
       - name: Build Sphinx documentation
-        run: |
-          sphinx-build -b html -W docs docs/_build/html
+        run: sphinx-build -b html -W docs docs/_build/html
+
+  rust:
+    name: Rust (fmt, clippy, test, doc)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy with warnings denied
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run Rust test suite
+        run: cargo test --all-targets
+
+      - name: Build Rust crate documentation
+        run: cargo doc --no-deps
 
   dependabot-automerge:
-    name: Dependabot Auto-Merge (Post-CI)
-    needs: test
+    name: Auto-merge Dependabot PR
+    needs: [test, rust]
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    if: github.actor == 'dependabot[bot]' && github.event_name == 'pull_request'
     permissions:
       contents: write
       pull-requests: write
+
     steps:
-      - name: Auto-merge Dependabot PR after successful tests
-        run: |
-          gh pr review --approve "$PR_URL" || true
-          gh pr merge --merge "$PR_URL" || gh pr merge --squash "$PR_URL" || true
+      - name: Auto-merge Dependabot PR
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge "${{ github.event.pull_request.html_url }}" --auto --merge || \
+          gh pr merge "${{ github.event.pull_request.html_url }}" --auto --squash

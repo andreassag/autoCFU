@@ -1,275 +1,201 @@
-"""Command-line interface for the AutoCFU colony detection engine."""
+"""Command-line interface for AutoCFU inference across CenterNet, StarDist, and Countability ONNX models."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
-from .config import load_config
-from .pipeline import AutoCFUEngine, InferenceResult, export_batch_summary_csv
+from autocfu.config import EngineConfig, load_config
+from autocfu.pipeline import IMAGE_EXTENSIONS, AutoCFUEngine, export_batch_summary_csv
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+
+def find_default_config() -> Path | None:
+    """Locate ``configs/default_inference.yaml`` relative to working directory or package root."""
+    candidates = [
+        Path.cwd() / "configs" / "default_inference.yaml",
+        Path(__file__).resolve().parent.parent.parent / "configs" / "default_inference.yaml",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Construct the ``autocfu`` CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="autocfu",
-        description="AutoCFU: Run high-resolution sliced inference for microbial colony detection and counting.",
+        description=(
+            "AutoCFU standalone ONNX inference engine for Petri dish colony detection "
+            "(Radial CenterNet), instance segmentation (2D StarDist), and countability classification."
+        ),
     )
     input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument(
-        "--image",
-        type=str,
-        help="Path to a single agar plate image file.",
-    )
-    input_group.add_argument(
-        "--input-dir",
-        type=str,
-        help="Directory containing plate images for batch processing.",
-    )
+    input_group.add_argument("--image", type=Path, help="Path to a single Petri dish image.")
+    input_group.add_argument("--input-dir", type=Path, help="Directory containing multiple Petri dish images.")
 
+    parser.add_argument("--model", type=Path, required=True, help="Path to exported .onnx model file.")
     parser.add_argument(
-        "--model",
+        "--model-type",
         type=str,
-        required=True,
-        help="Path to the exported RT-DETRv4 ONNX model file.",
+        default=None,
+        choices=["auto", "centernet", "stardist", "countability"],
+        help="Model architecture type (default: auto-detected from ONNX outputs).",
     )
     parser.add_argument(
         "--config",
-        type=str,
+        type=Path,
         default=None,
-        help="Path to inference YAML configuration file (defaults to configs/default_inference.yaml if present).",
+        help="Path to YAML configuration file (defaults to configs/default_inference.yaml if found).",
     )
-    parser.add_argument(
-        "--confidence",
-        type=float,
-        default=None,
-        help="Override detection confidence threshold (e.g. 0.35).",
-    )
-    parser.add_argument(
-        "--overlap",
-        type=float,
-        default=None,
-        help="Override slice overlap ratio (e.g. 0.20 for 20%% overlap).",
-    )
-    parser.add_argument(
-        "--slice-size",
-        type=int,
-        default=None,
-        help="Override slice window width and height (e.g. 640).",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="results",
-        help="Output directory to save detection results and overlays (default: results).",
-    )
-    parser.add_argument(
-        "--save-overlay",
-        action="store_true",
-        help="Save annotated images with colony bounding boxes.",
-    )
-    parser.add_argument(
-        "--save-json",
-        action="store_true",
-        help="Save structured JSON detection coordinates for each image.",
-    )
-    parser.add_argument(
-        "--save-csv",
-        action="store_true",
-        help="Save CSV summary and detection tables.",
-    )
+    parser.add_argument("--confidence", type=float, default=None, help="Confidence score threshold in [0.0, 1.0].")
+    parser.add_argument("--slice-size", type=int, default=None, help="Square slice dimension in pixels (e.g., 640).")
+    parser.add_argument("--overlap", type=float, default=None, help="Slice overlap ratio in [0.0, 1.0).")
     parser.add_argument(
         "--merger",
         type=str,
         default=None,
-        choices=["greedy_nmm", "nms"],
-        help="Override bounding box merger type (greedy_nmm or nms).",
+        choices=["greedy_nmm", "nms", "none"],
+        help="Cross-tile duplicate merging algorithm.",
     )
     parser.add_argument(
         "--match-metric",
         type=str,
         default=None,
-        choices=["iou", "ios"],
-        help="Override box matching metric (iou or ios).",
+        choices=["center_dist", "ios", "iou"],
+        help="Matching metric used during cross-tile merging.",
     )
+    parser.add_argument("--match-threshold", type=float, default=None, help="Threshold for merging overlapping boxes.")
+    parser.add_argument("--min-radius", type=float, default=None, help="Minimum colony radius in pixels.")
+    parser.add_argument("--max-radius", type=float, default=None, help="Maximum colony radius in pixels.")
     parser.add_argument(
-        "--match-threshold",
-        type=float,
-        default=None,
-        help="Override postprocess match IoU/IoS threshold (e.g. 0.50).",
-    )
-    parser.add_argument(
-        "--intra-tile-threshold",
-        type=float,
-        default=None,
-        help="Override intra-tile NMS duplicate query suppression threshold (e.g. 0.45, 0 to disable).",
-    )
-    parser.add_argument(
-        "--intra-tile-metric",
+        "--countability-scope",
         type=str,
         default=None,
-        choices=["iou", "ios"],
-        help="Override intra-tile match metric (iou or ios).",
+        choices=["both", "plate", "sections"],
+        help="Countability evaluation mode: whole plate, sliced 640x640 sections, or both.",
     )
     parser.add_argument(
-        "--min-box-size",
+        "--uncountable-threshold",
         type=float,
         default=None,
-        help="Override minimum box width and height in pixels (e.g. 6.0, 0 to disable).",
-    )
-    parser.add_argument(
-        "--max-box-size",
-        type=float,
-        default=None,
-        help="Override maximum box width and height in pixels (e.g. 300.0, 0 to disable).",
-    )
-    parser.add_argument(
-        "--max-aspect-ratio",
-        type=float,
-        default=None,
-        help="Override maximum allowed aspect ratio max(w/h, h/w) (e.g. 2.5, 0 to disable).",
+        help="Probability threshold on class 'uncountable' for binary countability verdict.",
     )
     parser.add_argument(
         "--device",
         type=str,
-        default="auto",
-        choices=["auto", "cuda", "cpu"],
-        help="Execution provider for ONNX Runtime (default: auto).",
+        default=None,
+        choices=["auto", "cpu", "cuda"],
+        help="ONNX Runtime execution provider preference.",
     )
-
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs"), help="Directory for output artifacts.")
+    parser.add_argument("--save-overlay", action="store_true", help="Save rendered detection/countability overlays.")
+    parser.add_argument("--save-json", action="store_true", help="Save per-image JSON predictions.")
+    parser.add_argument("--save-csv", action="store_true", help="Save per-image CSV predictions (plus batch summary).")
+    parser.add_argument(
+        "--save-mask",
+        action="store_true",
+        help="Save 16-bit uint16 instance segmentation masks (for CenterNet/StarDist).",
+    )
+    parser.add_argument("--show-labels", action="store_true", help="Draw confidence scores on saved overlay images.")
     return parser
 
 
-def find_default_config() -> str | None:
-    """Search common locations for configs/default_inference.yaml."""
-    candidates = [
-        Path("configs/default_inference.yaml"),
-        Path("../configs/default_inference.yaml"),
-        Path(__file__).resolve().parent.parent.parent / "configs" / "default_inference.yaml",
-    ]
-    for c in candidates:
-        if c.is_file():
-            return str(c)
-    return None
-
-
-def main(args_list: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(args_list)
-
-    # 1. Resolve configuration
-    config_path = args.config or find_default_config()
-    config = load_config(config_path)
-
-    # Apply CLI overrides
+def _apply_cli_overrides(config: EngineConfig, args: argparse.Namespace) -> EngineConfig:
+    if args.model_type is not None:
+        config.inference.model_type = args.model_type
     if args.confidence is not None:
         config.inference.confidence_threshold = args.confidence
-    if args.overlap is not None:
-        config.slicing.overlap_width_ratio = args.overlap
-        config.slicing.overlap_height_ratio = args.overlap
     if args.slice_size is not None:
         config.slicing.slice_width = args.slice_size
         config.slicing.slice_height = args.slice_size
+        config.inference.input_size = args.slice_size
+    if args.overlap is not None:
+        config.slicing.overlap_width_ratio = args.overlap
+        config.slicing.overlap_height_ratio = args.overlap
     if args.merger is not None:
         config.inference.merger_type = args.merger
     if args.match_metric is not None:
         config.inference.match_metric = args.match_metric
     if args.match_threshold is not None:
         config.inference.postprocess_match_threshold = args.match_threshold
-    if args.intra_tile_threshold is not None:
-        config.inference.intra_tile_nms_threshold = args.intra_tile_threshold
-    if args.intra_tile_metric is not None:
-        config.inference.intra_tile_match_metric = args.intra_tile_metric
-    if args.min_box_size is not None:
-        config.inference.min_box_size = args.min_box_size
-    if args.max_box_size is not None:
-        config.inference.max_box_size = args.max_box_size
-    if args.max_aspect_ratio is not None:
-        config.inference.max_aspect_ratio = args.max_aspect_ratio
+    if args.min_radius is not None:
+        config.inference.min_radius = args.min_radius
+    if args.max_radius is not None:
+        config.inference.max_radius = args.max_radius
+    if args.countability_scope is not None:
+        config.inference.countability_scope = args.countability_scope
+    if args.uncountable_threshold is not None:
+        config.inference.uncountable_threshold = args.uncountable_threshold
+    if args.device is not None:
+        config.inference.device = args.device
 
-    # 2. Gather image paths
-    image_paths: list[Path] = []
-    if args.image:
-        p = Path(args.image)
-        if not p.is_file():
-            print(f"Error: Image file not found: {p}", file=sys.stderr)
+    # Re-validate mutated fields
+    config.slicing.__post_init__()
+    config.inference.__post_init__()
+    return config
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI entry point returning an OS exit status code."""
+    parser = build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    cfg_path = args.config if args.config is not None else find_default_config()
+    config = _apply_cli_overrides(load_config(cfg_path), args)
+
+    if args.image is not None:
+        if not args.image.exists():
+            print(f"Error: Input image not found: {args.image}", file=sys.stderr)
             return 1
-        image_paths.append(p)
-    elif args.input_dir:
-        dir_p = Path(args.input_dir)
-        if not dir_p.is_dir():
-            print(f"Error: Input directory not found: {dir_p}", file=sys.stderr)
+        image_paths = [args.image]
+    else:
+        assert args.input_dir is not None
+        if not args.input_dir.is_dir():
+            print(f"Error: Input directory not found: {args.input_dir}", file=sys.stderr)
             return 1
-        for f in sorted(dir_p.iterdir()):
-            if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS:
-                image_paths.append(f)
-
-    if not image_paths:
-        print("No valid images found to process.", file=sys.stderr)
-        return 1
-
-    # 3. Initialize engine
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        engine = AutoCFUEngine(
-            model_path=args.model,
-            config=config,
-            device=args.device,
+        image_paths = sorted(
+            p for p in args.input_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
         )
-    except Exception as err:
-        print(f"Failed to initialize inference engine: {err}", file=sys.stderr)
-        return 1
+        if not image_paths:
+            print(f"Error: No image files found in directory: {args.input_dir}", file=sys.stderr)
+            return 1
 
-    print(f"Starting inference on {len(image_paths)} plate image(s)...")
-    print(
-        f"Settings: slice={config.slicing.slice_width}x{config.slicing.slice_height}, "
-        f"overlap={config.slicing.overlap_width_ratio * 100:.0f}%, "
-        f"conf_thresh={config.inference.confidence_threshold:.2f}, "
-        f"merger={config.inference.merger_type}"
+    engine = AutoCFUEngine(model_path=args.model, config=config)
+    results = engine.predict_batch(
+        image_paths,
+        output_dir=args.output_dir,
+        save_overlay=args.save_overlay,
+        save_json=args.save_json,
+        save_csv=args.save_csv,
+        save_mask=args.save_mask,
+        show_labels=args.show_labels,
     )
 
-    results: list[InferenceResult] = []
-    total_colonies = 0
-
-    for idx, img_path in enumerate(image_paths, start=1):
-        try:
-            res = engine.infer_image(img_path)
-            results.append(res)
-            total_colonies += res.colony_count
-
-            print(
-                f"[{idx}/{len(image_paths)}] {img_path.name}: "
-                f"{res.colony_count} colonies ({res.num_slices} tiles, {res.execution_time_seconds:.2f}s)"
-            )
-
-            stem = img_path.stem
-            if args.save_overlay:
-                overlay_path = output_dir / f"{stem}_detected.jpg"
-                res.draw_overlay(output_path=overlay_path)
-
-            if args.save_json:
-                json_path = output_dir / f"{stem}_detections.json"
-                res.save_json(json_path)
-
-            if args.save_csv:
-                csv_path = output_dir / f"{stem}_detections.csv"
-                res.save_csv(csv_path)
-
-        except Exception as err:
-            print(f"Error processing {img_path}: {err}", file=sys.stderr)
-
     if args.save_csv and len(results) > 1:
-        batch_summary_csv = output_dir / "summary.csv"
-        export_batch_summary_csv(results, batch_summary_csv)
-        print(f"Summary table saved to {batch_summary_csv}")
+        summary_path = Path(args.output_dir) / "batch_summary.csv"
+        export_batch_summary_csv(results, summary_path)
 
-    print(f"\nDone. Processed {len(results)} image(s), detected {total_colonies} colonies total.")
+    for res in results:
+        name = Path(res.image_path).name if res.image_path else "<memory>"
+        if res.model_type == "countability" and res.countability_report is not None:
+            rep = res.countability_report
+            verdict = "COUNTABLE" if rep.is_countable else "UNCOUNTABLE"
+            wp_label = rep.whole_plate.pred_label if rep.whole_plate is not None else "n/a"
+            print(
+                f"{name}: verdict={verdict} (whole_plate={wp_label}, "
+                f"sections=empty:{rep.empty_section_count}/countable:{rep.countable_section_count}/"
+                f"uncountable:{rep.uncountable_section_count}) [{res.inference_time_ms:.1f} ms]"
+            )
+        else:
+            print(
+                f"{name}: {res.colony_count} colonies "
+                f"(model={res.model_type}, slices={res.num_slices}, {res.inference_time_ms:.1f} ms)"
+            )
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

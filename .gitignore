@@ -10,9 +10,11 @@ __pycache__/
 *$py.class
 *.so
 
-# Distribution / Packaging
+# Distribution / Packaging / Rust
 build/
 dist/
+target/
+outputs/
 *.egg-info/
 .eggs/
 

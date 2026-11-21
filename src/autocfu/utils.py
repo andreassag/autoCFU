@@ -1,402 +1,264 @@
-"""Utility functions for dataset inspection, ground-truth extraction, and visualization."""
+"""Utility helpers for dish label validation, ground-truth extraction, metrics, and plotting."""
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Sequence
+import importlib
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 import numpy as np
+from PIL import Image, ImageDraw
 
-from .merger import calculate_iou
+from autocfu.merger import Detection, calculate_iou
 
-logger = logging.getLogger(__name__)
-
-KNOWN_COLONY_LABELS: set[str | int] = {
+KNOWN_COLONY_LABELS: set[str] = {
     "colony",
-    "e.coli",
-    "e. coli",
-    "s.aureus",
-    "s. aureus",
+    "colonies",
     "b.subtilis",
-    "b. subtilis",
     "c.albicans",
-    "c. albicans",
+    "e.coli",
     "p.aeruginosa",
-    "p. aeruginosa",
-    "contamination",
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "6",
-    0,
-    1,
-    2,
-    3,
-    4,
-    6,
+    "s.aureus",
+    "microbial_colony",
 }
-IGNORED_CATEGORIES: set[str | int] = {"Defect", "defect", "agar_bubble", 5, "5"}
+
+IGNORED_CATEGORIES: set[str] = {
+    "",
+    "background",
+    "contamination",
+    "defect",
+    "noise",
+    "bubble",
+    "edge",
+    "empty",
+}
 
 
-def is_colony_label(label: str | int) -> bool:
-    """Determine whether a category label corresponds to a colony or contamination.
+def is_colony_label(label: str | int | None) -> bool:
+    """Return ``True`` when ``label`` represents a valid microbial colony target.
+
+    Accepts non-negative integer class IDs and non-empty strings not present in
+    ``IGNORED_CATEGORIES``.
+    """
+    if label is None:
+        return False
+    if isinstance(label, int):
+        return label >= 0
+    normalized = str(label).strip().lower()
+    return bool(normalized) and normalized not in IGNORED_CATEGORIES
+
+
+def is_valid_highres_plate(sample: dict[str, Any], min_size: int = 1000) -> bool:
+    """Check whether a sample mapping represents a full-resolution dish image.
 
     Args:
-        label: Raw category label or class ID from plate annotations.
+        sample: Dictionary containing image metadata (``width``/``height``) or ``image``.
+        min_size: Minimum width and height in pixels.
 
     Returns:
-        True if label represents a colony target, False for defects and artifacts.
+        ``True`` if dimensions satisfy ``width >= min_size`` and ``height >= min_size``
+        and the sample is not flagged as a cropped tile.
     """
-    clean_label = str(label).strip().lower()
-    if any(str(ign).lower() == clean_label or str(ign).lower() in clean_label for ign in IGNORED_CATEGORIES):
-        return False
-    clean_no_spaces = clean_label.replace(" ", "")
-    return (
-        clean_label in KNOWN_COLONY_LABELS
-        or clean_no_spaces in KNOWN_COLONY_LABELS
-        or "colony" in clean_label
-        or "contamination" in clean_label
-        or (isinstance(label, int) and label in KNOWN_COLONY_LABELS)
-    )
-
-
-def is_valid_highres_plate(sample: dict[str, Any], min_dim: int = 3000) -> bool:
-    """Validate that an AGAR dataset sample is a full-resolution countable Petri dish.
-
-    Args:
-        sample: Raw sample dictionary from AGAR dataset.
-        min_dim: Minimum acceptable image dimension in pixels (default: 3000).
-
-    Returns:
-        True if the image is a high-resolution, countable Petri dish.
-    """
-    img = sample.get("image")
-    if img is None:
+    if sample.get("is_tiled") is True:
         return False
 
-    if hasattr(img, "shape") and hasattr(img.shape, "__len__") and len(img.shape) >= 2:
-        h, w = int(img.shape[0]), int(img.shape[1])
-    elif hasattr(img, "size") and isinstance(img.size, (tuple, list)) and len(img.size) >= 2:
-        w, h = int(img.size[0]), int(img.size[1])
-    else:
+    width = sample.get("width")
+    height = sample.get("height")
+    if (width is None or height is None) and "image" in sample:
+        img = sample["image"]
+        if isinstance(img, Image.Image):
+            width, height = img.size
+        elif isinstance(img, np.ndarray) and img.ndim >= 2:
+            height, width = int(img.shape[0]), int(img.shape[1])
+
+    if width is None or height is None:
         return False
-
-    if w < min_dim or h < min_dim or (w == 2048 and h == 2048):
-        return False
-
-    col_num = sample.get("colonies_number")
-    if col_num is not None:
-        try:
-            if int(col_num) == -1:
-                return False
-        except (ValueError, TypeError):
-            pass
-
-    if sample.get("image_type") in (2, "uncountable"):
-        return False
-
-    return True
+    return int(width) >= int(min_size) and int(height) >= int(min_size)
 
 
 def extract_gt_colony_boxes(sample: dict[str, Any]) -> list[tuple[float, float, float, float]]:
-    """Extract ground-truth colony bounding boxes [x1, y1, x2, y2] in plate coordinates.
+    """Extract ground-truth ``(xmin, ymin, xmax, ymax)`` colony boxes from a sample record.
 
-    Handles both standard AGAR dictionary format ('objects' with 'bbox' and 'category')
-    and flat formats ('bboxes'/'boxes' and 'labels'/'categories').
+    Supports both ``centernet.json`` format (``objects`` containing ``x_px``, ``y_px``,
+    ``r_px``) and generic annotation lists (``annotations`` or ``boxes``).
 
     Args:
-        sample: Dictionary containing plate annotations.
+        sample: Metadata dictionary or JSON payload.
 
     Returns:
-        List of bounding boxes in [x1, y1, x2, y2] float format.
+        List of bounding boxes in ``(xmin, ymin, xmax, ymax)`` pixel coordinates.
     """
-    gt_boxes: list[tuple[float, float, float, float]] = []
+    boxes: list[tuple[float, float, float, float]] = []
 
-    # AGAR dataset format: sample['objects'] -> {'bbox': [[x, y, w, h], ...], 'category': [...]}
-    objects = sample.get("objects") or {}
-    raw_bboxes = (objects.get("bbox") or []) if isinstance(objects, dict) else []
-    raw_categories = (objects.get("category") or objects.get("label") or []) if isinstance(objects, dict) else []
-    if raw_bboxes:
-        for idx, bbox in enumerate(raw_bboxes):
-            cat = raw_categories[idx] if idx < len(raw_categories) else 0
-            if not is_colony_label(cat):
+    if isinstance(sample.get("objects"), list):
+        for obj in sample["objects"]:
+            if not isinstance(obj, dict):
                 continue
-            if len(bbox) == 4:
-                bx, by, bw, bh = bbox
-                if bw > 0 and bh > 0:
-                    gt_boxes.append((float(bx), float(by), float(bx + bw), float(by + bh)))
-        return gt_boxes
+            if obj.get("is_contamination") is True:
+                continue
+            label = obj.get("single_class_name", obj.get("class_name", "colony"))
+            if not is_colony_label(label):
+                continue
+            if "x_px" in obj and "y_px" in obj and "r_px" in obj:
+                cx = float(obj["x_px"])
+                cy = float(obj["y_px"])
+                r = max(0.0, float(obj["r_px"]))
+                boxes.append((cx - r, cy - r, cx + r, cy + r))
+        return boxes
 
-    # Fallback for flat schemas: sample['bboxes'] / sample['boxes']
-    raw_boxes = sample.get("bboxes") or sample.get("boxes") or []
-    labels = sample.get("labels") or sample.get("categories") or []
-    for idx, b in enumerate(raw_boxes):
-        lbl = labels[idx] if idx < len(labels) else 0
-        if not is_colony_label(lbl):
-            continue
-        if len(b) == 4:
-            gt_boxes.append((float(b[0]), float(b[1]), float(b[2]), float(b[3])))
+    raw_items = sample.get("annotations") or sample.get("boxes") or []
+    for item in raw_items:
+        if isinstance(item, dict):
+            label = item.get("category", item.get("label", "colony"))
+            if not is_colony_label(label):
+                continue
+            coords = item.get("bbox") or item.get("box")
+            if coords and len(coords) == 4:
+                x1, y1, v3, v4 = (float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3]))
+                fmt = str(item.get("format", "xyxy")).lower()
+                if fmt == "xywh":
+                    boxes.append((x1, y1, x1 + v3, y1 + v4))
+                else:
+                    boxes.append((x1, y1, v3, v4))
+        elif isinstance(item, (list, tuple)) and len(item) == 4:
+            boxes.append((float(item[0]), float(item[1]), float(item[2]), float(item[3])))
 
-    return gt_boxes
+    return boxes
 
 
 def compute_detection_metrics(
-    pred_boxes: Sequence[Sequence[float]],
-    gt_boxes: Sequence[Sequence[float]],
-    scores: Sequence[float] | None = None,
+    preds: Sequence[Detection],
+    gt_boxes: Sequence[tuple[float, float, float, float]],
     iou_threshold: float = 0.50,
 ) -> dict[str, float]:
-    """Compute greedy IoU-matched detection metrics at a specified IoU threshold.
-
-    Sorts predictions by descending confidence score when provided, matching each prediction
-    greedily to the ground truth box with the highest IoU >= iou_threshold.
+    """Compute greedy 1-to-1 IoU detection metrics against ground-truth boxes.
 
     Args:
-        pred_boxes: Sequence of predicted boxes [x1, y1, x2, y2].
-        gt_boxes: Sequence of ground-truth boxes [x1, y1, x2, y2].
-        scores: Optional sequence of confidence scores corresponding to pred_boxes.
-        iou_threshold: Intersection-over-Union threshold for a true positive match.
+        preds: Predicted :class:`Detection` instances.
+        gt_boxes: Ground-truth ``(xmin, ymin, xmax, ymax)`` boxes.
+        iou_threshold: Minimum IoU required for a true-positive match.
 
     Returns:
-        Dictionary with keys 'tp', 'fp', 'fn', 'precision', 'recall', 'f1', 'abs_err', 'count_acc'.
+        Dictionary with ``precision``, ``recall``, ``f1``, ``tp``, ``fp``, ``fn``,
+        ``pred_count``, ``gt_count``, and ``count_error``.
     """
-    num_pred = len(pred_boxes)
-    num_gt = len(gt_boxes)
-    abs_err = abs(num_pred - num_gt)
-    count_acc = max(0.0, 1.0 - (abs_err / max(1, num_gt)))
-
-    if num_gt == 0 and num_pred == 0:
-        return {
-            "tp": 0.0,
-            "fp": 0.0,
-            "fn": 0.0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "f1": 1.0,
-            "abs_err": 0.0,
-            "count_acc": 1.0,
-        }
-
-    if num_gt == 0:
-        return {
-            "tp": 0.0,
-            "fp": float(num_pred),
-            "fn": 0.0,
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "abs_err": float(abs_err),
-            "count_acc": 0.0,
-        }
-
-    if num_pred == 0:
-        return {
-            "tp": 0.0,
-            "fp": 0.0,
-            "fn": float(num_gt),
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "abs_err": float(abs_err),
-            "count_acc": round(count_acc, 4),
-        }
-
-    if scores is not None and len(scores) == len(pred_boxes):
-        sorted_indices = sorted(range(len(pred_boxes)), key=lambda k: scores[k], reverse=True)
-        sorted_preds = [pred_boxes[k] for k in sorted_indices]
-    else:
-        sorted_preds = list(pred_boxes)
-
-    matched_gt: set[int] = set()
+    sorted_preds = sorted(preds, key=lambda d: -d.score)
+    matched_gt = [False] * len(gt_boxes)
     tp = 0
-    for p in sorted_preds:
-        best_iou, best_idx = 0.0, -1
-        for idx, g in enumerate(gt_boxes):
-            if idx in matched_gt:
+
+    for det in sorted_preds:
+        if det.bbox is None:
+            continue
+        best_iou = 0.0
+        best_idx = -1
+        for idx, gt_box in enumerate(gt_boxes):
+            if matched_gt[idx]:
                 continue
-            iou = calculate_iou(p, g)
+            iou = calculate_iou(det.bbox, gt_box)
             if iou >= iou_threshold and iou > best_iou:
-                best_iou, best_idx = iou, idx
+                best_iou = iou
+                best_idx = idx
         if best_idx >= 0:
-            matched_gt.add(best_idx)
+            matched_gt[best_idx] = True
             tp += 1
 
-    fp = num_pred - tp
-    fn = num_gt - tp
-    precision = tp / max(1, tp + fp)
-    recall = tp / max(1, tp + fn)
-    f1 = (2 * precision * recall) / max(1e-6, precision + recall)
+    fp = len(sorted_preds) - tp
+    fn = len(gt_boxes) - tp
+    precision = float(tp) / float(tp + fp) if (tp + fp) > 0 else 0.0
+    recall = float(tp) / float(tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0.0 else 0.0
+
     return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
         "tp": float(tp),
         "fp": float(fp),
         "fn": float(fn),
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "abs_err": float(abs_err),
-        "count_acc": round(count_acc, 4),
+        "pred_count": float(len(sorted_preds)),
+        "gt_count": float(len(gt_boxes)),
+        "count_error": float(abs(len(sorted_preds) - len(gt_boxes))),
     }
 
 
 def stream_sample_plate(
-    subset: str = "bright",
-    index: int = 0,
-    dataset_id: str = "leodriesch/agar",
+    dataset_id: str = "andreassag/agar_leodriesch_singleclass",
     split: str = "validation",
-    hf_token: str | None = None,
-    min_dim: int = 3000,
-) -> tuple[np.ndarray, str]:
-    """Stream a high-resolution plate record from Hugging Face Hub.
+    index: int = 0,
+) -> dict[str, Any]:
+    """Stream one sample Petri dish record from Hugging Face for quick inference demos.
 
-    Args:
-        subset: Dataset subset or illumination ('bright' or 'dark').
-        index: Zero-based index of valid plate to select.
-        dataset_id: Hugging Face dataset identifier.
-        split: Dataset split ('train', 'validation', or 'test').
-        hf_token: Optional Hugging Face authentication token.
-        min_dim: Minimum image dimension for validity filtering.
-
-    Returns:
-        Tuple of (image_rgb_array, description_title).
-
-    Raises:
-        ValueError: If index is negative.
-        ImportError: If the 'datasets' package is not installed.
-        RuntimeError: If no valid plate is found at the given index.
+    Requires the optional ``datasets`` package; raises a clear ``ImportError`` if absent.
     """
-    if index < 0:
-        raise ValueError(f"Index must be non-negative, got {index}.")
-
-    import importlib
-
     try:
-        load_dataset = importlib.import_module("datasets").load_dataset
-    except ImportError as err:
+        datasets_mod = importlib.import_module("datasets")
+        load_dataset = datasets_mod.load_dataset
+    except ImportError as exc:
         raise ImportError(
-            "The 'datasets' package is required to stream plates from Hugging Face Hub. "
-            "Install it via 'pip install datasets'."
-        ) from err
+            "Streaming sample plates requires the optional 'datasets' package (`pip install datasets`)."
+        ) from exc
 
-    import os
-
-    token = hf_token or os.environ.get("HF_TOKEN") or None
-    ds = load_dataset(dataset_id, subset, split=split, streaming=True, token=token)
-    valid_idx = 0
-    for item in ds:
-        if is_valid_highres_plate(item, min_dim=min_dim):
-            if valid_idx >= index:
-                image = item["image"]
-                rgb = np.asarray(image.convert("RGB"))
-                img_id = item.get("image_id", f"{subset}_{valid_idx}")
-                sub_clean = subset.lower().removesuffix("field")
-                title = f"{sub_clean.capitalize()}field Plate (ID: {img_id}, Size: {rgb.shape[1]}x{rgb.shape[0]} px)"
-                return rgb, title
-            valid_idx += 1
-
-    raise RuntimeError(f"Could not find a valid high-resolution plate in '{subset}' split at index {index}.")
+    stream = load_dataset(dataset_id, split=split, streaming=True)
+    for idx, sample in enumerate(stream):
+        if idx == index:
+            return dict(sample)
+    raise IndexError(f"Sample index {index} out of range for split '{split}' of '{dataset_id}'.")
 
 
 def plot_plate_detections(
-    image_rgb: np.ndarray,
-    detections: Sequence[Any],
-    title: str,
-    duration: float | None = None,
-    crop_size: int = 250,
-) -> list[tuple[int, int, int, int, float]]:
-    """Render full-plate annotated image and a 3x3 grid of native-resolution zoom crops.
+    image: np.ndarray | Image.Image,
+    detections: Sequence[Detection],
+    *,
+    gt_boxes: Sequence[tuple[float, float, float, float]] | None = None,
+    output_path: str | Path | None = None,
+    show_labels: bool = False,
+) -> Image.Image:
+    """Render predictions (circles/polygons/boxes) and optional GT boxes onto a dish image.
 
     Args:
-        image_rgb: Full plate image as RGB NumPy array.
-        detections: List of detections (Detection instances, SAHI ObjectPrediction, or tuples/lists).
-        title: Title string for the full dish visualization.
-        duration: Optional inference execution time in seconds.
-        crop_size: Pixel dimension of square zoom crops (default: 250).
+        image: Source RGB dish image.
+        detections: Model detections to visualize in bright green/cyan.
+        gt_boxes: Optional ground-truth boxes drawn in amber dashed/thin outlines.
+        output_path: Optional file path to save the rendered PNG/JPG image.
+        show_labels: Whether to draw prediction confidence values.
 
     Returns:
-        List of tuples (cx, cy, width, height, score) for each detection.
-
-    Raises:
-        ImportError: If 'opencv-python' or 'matplotlib' is not installed.
+        Annotated ``PIL.Image.Image``.
     """
-    import importlib
+    if isinstance(image, Image.Image):
+        canvas = image.convert("RGB").copy()
+    else:
+        arr = np.asarray(image)
+        if arr.dtype != np.uint8:
+            scale = 255.0 if arr.size and float(np.max(arr)) <= 1.0 else 1.0
+            arr = np.clip(arr * scale, 0.0, 255.0).astype(np.uint8)
+        canvas = Image.fromarray(arr).convert("RGB")
 
-    try:
-        cv2 = importlib.import_module("cv2")
-    except ImportError as err:
-        raise ImportError(
-            "The 'opencv-python' package is required for plot_plate_detections. "
-            "Install it via 'pip install opencv-python-headless'."
-        ) from err
+    draw = ImageDraw.Draw(canvas)
+    if gt_boxes:
+        for gt_box in gt_boxes:
+            draw.rectangle(gt_box, outline=(255, 193, 7), width=2)
 
-    try:
-        plt = importlib.import_module("matplotlib.pyplot")
-    except ImportError as err:
-        raise ImportError(
-            "The 'matplotlib' package is required for plot_plate_detections. Install it via 'pip install matplotlib'."
-        ) from err
-
-    annotated = image_rgb.copy() if hasattr(image_rgb, "copy") else image_rgb
-    plate_h, plate_w = image_rgb.shape[:2]
-
-    colony_coords: list[tuple[int, int, int, int, float]] = []
     for det in detections:
-        if hasattr(det, "bbox") and isinstance(det.bbox, (tuple, list)):
-            x1, y1, x2, y2 = [int(round(v)) for v in det.bbox]
-            score_val = float(det.score)
-        elif hasattr(det, "bbox"):
-            b = det.bbox
-            x1, y1, x2, y2 = int(round(b.minx)), int(round(b.miny)), int(round(b.maxx)), int(round(b.maxy))
-            score_val = float(det.score.value)
-        else:
-            x1, y1, x2, y2 = [int(round(v)) for v in det[:4]]
-            score_val = float(det[4]) if len(det) > 4 else 1.0
-        cx, cy = int(round((x1 + x2) / 2)), int(round((y1 + y2) / 2))
-        colony_coords.append((cx, cy, x2 - x1, y2 - y1, score_val))
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 3)
-        cv2.circle(annotated, (cx, cy), 4, (0, 0, 255), -1)
+        if det.polygon and len(det.polygon) >= 3:
+            draw.polygon(det.polygon, outline=(0, 255, 160), width=2)
+        elif det.center_xy is not None and det.radius_px is not None:
+            cx, cy = det.center_xy
+            r = max(1.0, det.radius_px)
+            draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(0, 230, 118), width=2)
+        elif det.bbox is not None:
+            draw.rectangle(det.bbox, outline=(0, 230, 118), width=2)
 
-    # 1. Full-plate render
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(annotated)
-    dur_str = f" in {duration:.2f}s" if duration is not None else ""
-    ax.set_title(f"{title}\nDetections: {len(detections)} Colonies{dur_str}", fontsize=12)
-    ax.axis("off")
-    plt.tight_layout()
-    plt.show()
+        if det.center_xy is not None:
+            cx, cy = det.center_xy
+            draw.ellipse((cx - 2.0, cy - 2.0, cx + 2.0, cy + 2.0), fill=(255, 82, 82))
+        if show_labels and det.bbox is not None:
+            draw.text((det.bbox[0], max(0.0, det.bbox[1] - 12.0)), f"{det.score:.2f}", fill=(255, 255, 0))
 
-    # 2. 3x3 Zoom panels
-    if colony_coords:
-        fig, axes = plt.subplots(3, 3, figsize=(12, 12))
-        num_samples = min(9, len(colony_coords))
-        sample_indices = np.linspace(0, len(colony_coords) - 1, num_samples).astype(int)
-        for i, ax in enumerate(axes.ravel()):
-            if i < len(sample_indices):
-                idx = sample_indices[i]
-                cx, cy, cw, ch, sc = colony_coords[idx]
-                x_min = max(0, min(cx - crop_size // 2, max(0, plate_w - crop_size)))
-                y_min = max(0, min(cy - crop_size // 2, max(0, plate_h - crop_size)))
-                x_max = min(plate_w, x_min + crop_size)
-                y_max = min(plate_h, y_min + crop_size)
-                crop = annotated[y_min:y_max, x_min:x_max]
-                ax.imshow(crop)
-                ax.set_title(f"Colony #{idx + 1} ({sc:.2f}) | {cw}x{ch} px", fontsize=9)
-            ax.axis("off")
-        plt.suptitle("Native-Resolution Zoom Inspection (3x3 Panels)", fontsize=13)
-        plt.tight_layout()
-        plt.show()
+    if output_path is not None:
+        dest = Path(output_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(dest)
 
-    return colony_coords
-
-
-__all__ = [
-    "IGNORED_CATEGORIES",
-    "KNOWN_COLONY_LABELS",
-    "compute_detection_metrics",
-    "extract_gt_colony_boxes",
-    "is_colony_label",
-    "is_valid_highres_plate",
-    "plot_plate_detections",
-    "stream_sample_plate",
-]
+    return canvas

@@ -1,225 +1,153 @@
-"""Unit tests for AutoCFUEngine pipeline, config, and output serializers."""
+"""Unit tests for AutoCFUEngine, mask export, overlays, and CSV/JSON reporters."""
 
 from __future__ import annotations
 
-import tests  # noqa: F401  # isort: skip
-
+import csv
 import json
-import tempfile
-import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from PIL import Image
 
-from autocfu.config import EngineConfig, load_config
+from autocfu.config import EngineConfig, InferenceConfig, SlicingConfig
 from autocfu.merger import Detection
-from autocfu.pipeline import AgarInferenceEngine, AutoCFUEngine, InferenceResult, export_batch_summary_csv
+from autocfu.model import AnyONNXModel, CountabilityResult
+from autocfu.pipeline import (
+    AutoCFUEngine,
+    InferenceResult,
+    PlateCountabilityReport,
+    export_batch_summary_csv,
+)
 
 
-class MockModel:
-    """Mock model that returns deterministic detections for pipeline testing."""
+class _StubSpatialModel:
+    def __init__(self, model_type: str = "stardist") -> None:
+        self.model_type = model_type
 
-    def __init__(self, detections_per_slice: list[Detection]) -> None:
-        self.detections = detections_per_slice
+    def predict(self, image: Any, **kwargs: Any) -> list[Detection]:
+        _ = (image, kwargs)
+        if self.model_type == "stardist":
+            return [Detection(score=0.92, center_xy=(320.0, 320.0), rays=[14.0] * 32)]
+        return [Detection(score=0.90, center_xy=(320.0, 320.0), radius_px=12.0)]
 
-    def predict_slice(
+
+class _StubCountabilityModel:
+    model_type: str = "countability"
+
+    def predict(
         self,
-        crop: np.ndarray,
-        confidence_threshold: float = 0.35,
-        target_class_id: int | None = 0,
-        class_name: str = "colony",
-    ) -> list[Detection]:
-        # Return detections that meet confidence threshold and target class
-        return [
-            d
-            for d in self.detections
-            if d.score >= confidence_threshold and (target_class_id is None or d.class_id == target_class_id)
-        ]
-
-
-class TestPipeline(unittest.TestCase):
-    def test_config_load_and_save(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yaml_path = Path(tmpdir) / "test_config.yaml"
-            cfg = EngineConfig()
-            cfg.slicing.slice_width = 500
-            cfg.inference.confidence_threshold = 0.42
-            cfg.inference.min_box_size = 6.0
-            cfg.inference.max_box_size = 300.0
-            cfg.inference.max_aspect_ratio = 2.5
-            cfg.save_yaml(yaml_path)
-
-            loaded = load_config(yaml_path)
-            self.assertEqual(loaded.slicing.slice_width, 500)
-            self.assertAlmostEqual(loaded.inference.confidence_threshold, 0.42)
-            self.assertAlmostEqual(loaded.inference.min_box_size, 6.0)
-            self.assertAlmostEqual(loaded.inference.max_box_size, 300.0)
-            self.assertAlmostEqual(loaded.inference.max_aspect_ratio, 2.5)
-
-    def test_pipeline_with_mock_model(self) -> None:
-        # Define mock detection inside slice coordinates (e.g., at [10, 10, 30, 30])
-        mock_detection = Detection(
-            bbox=(10.0, 10.0, 30.0, 30.0),
-            score=0.9,
-            class_id=0,
-            label="colony",
-        )
-        mock_model = MockModel([mock_detection])
-
-        cfg = EngineConfig()
-        cfg.slicing.slice_width = 200
-        cfg.slicing.slice_height = 200
-        cfg.slicing.overlap_width_ratio = 0.0
-        cfg.slicing.overlap_height_ratio = 0.0
-
-        engine = AutoCFUEngine(model=mock_model, config=cfg)
-        self.assertIs(AgarInferenceEngine, AutoCFUEngine)
-
-        # Create a synthetic 400x400 image
-        synthetic_img = Image.new("RGB", (400, 400), color=(200, 200, 200))
-        result = engine.infer_image(synthetic_img)
-
-        self.assertEqual(result.num_slices, 4)
-        # Because the mock returns 1 detection per slice, and slices are disjoint:
-        self.assertEqual(result.colony_count, 4)
-        self.assertEqual(result.image_size, (400, 400))
-        self.assertGreater(result.execution_time_seconds, 0.0)
-
-        # Verify coordinate shifting on the 4 tiles:
-        # Tiles start at (0,0), (200,0), (0,200), (200,200)
-        # Detection at [10, 10, 30, 30] shifted to:
-        # Tile 1: [10, 10, 30, 30]
-        # Tile 2: [210, 10, 230, 30]
-        # Tile 3: [10, 210, 30, 230]
-        # Tile 4: [210, 210, 230, 230]
-        bboxes = sorted([det.bbox for det in result.detections])
-        self.assertEqual(bboxes[0], (10.0, 10.0, 30.0, 30.0))
-        self.assertEqual(bboxes[1], (10.0, 210.0, 30.0, 230.0))
-        self.assertEqual(bboxes[2], (210.0, 10.0, 230.0, 30.0))
-        self.assertEqual(bboxes[3], (210.0, 210.0, 230.0, 230.0))
-
-    def test_result_serialization_and_overlay(self) -> None:
-        det = Detection(bbox=(50.0, 50.0, 100.0, 100.0), score=0.88, class_id=0, label="colony")
-        res = InferenceResult(
-            image_path="test_dish.jpg",
-            image_size=(500, 500),
-            detections=[det],
-            colony_count=1,
-            num_slices=1,
-            execution_time_seconds=0.123,
+        image: Any,
+        *,
+        uncountable_threshold: float = 0.50,
+        region_bbox: tuple[int, int, int, int] | None = None,
+    ) -> CountabilityResult:
+        _ = image
+        is_full = region_bbox is not None and (region_bbox[2] - region_bbox[0]) > 640
+        probs = (0.05, 0.85, 0.10) if is_full else (0.10, 0.30, 0.60)
+        cls_id = 1 if is_full else 2
+        labels = ("empty", "countable", "uncountable")
+        return CountabilityResult(
+            probs=probs,
+            logits=(0.0, 0.0, 0.0),
+            pred_class_id=cls_id,
+            pred_label=labels[cls_id],
+            is_countable=probs[2] < uncountable_threshold,
+            countable_probability=probs[0] + probs[1],
+            uncountable_probability=probs[2],
+            region_bbox=region_bbox,
         )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            json_file = Path(tmpdir) / "output.json"
-            res.save_json(json_file)
-            self.assertTrue(json_file.is_file())
 
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self.assertEqual(data["colony_count"], 1)
-            self.assertEqual(data["image_width"], 500)
+def test_stardist_engine_mask_and_exports(tmp_path: Path) -> None:
+    cfg = EngineConfig(
+        slicing=SlicingConfig(slice_width=640, slice_height=640, overlap_width_ratio=0.20, overlap_height_ratio=0.20),
+        inference=InferenceConfig(model_type="stardist", match_metric="center_dist", postprocess_match_threshold=0.8),
+    )
+    engine = AutoCFUEngine(
+        model_path=tmp_path / "sd.onnx", config=cfg, model=cast(AnyONNXModel, _StubSpatialModel("stardist"))
+    )
 
-            csv_file = Path(tmpdir) / "output.csv"
-            res.save_csv(csv_file)
-            self.assertTrue(csv_file.is_file())
+    img = np.zeros((1000, 1000, 3), dtype=np.uint8)
+    result = engine.predict(img)
+    assert result.model_type == "stardist"
+    assert result.num_slices == 4
+    # Center-placed detections at tile (320, 320) become (320,320), (680,320), (320,680), (680,680)
+    assert result.colony_count == 4
+    assert len(result.radii) == 4
+    assert all(poly is not None and len(poly) == 32 for poly in result.polygons)
 
-            batch_csv = Path(tmpdir) / "batch.csv"
-            export_batch_summary_csv([res], batch_csv)
-            self.assertTrue(batch_csv.is_file())
+    mask = result.to_mask(dtype=np.uint16)
+    assert mask.shape == (1000, 1000)
+    assert mask.dtype == np.uint16
+    assert mask[320, 320] == 1
+    assert mask[680, 680] == 4
 
-            overlay_img = Path(tmpdir) / "overlay.png"
-            res.draw_overlay(output_path=overlay_img)
-            self.assertTrue(overlay_img.is_file())
+    tif_path = result.save_mask(tmp_path / "out_mask.tif")
+    png_path = result.save_mask(tmp_path / "out_mask.png")
+    assert tif_path.exists()
+    assert png_path.exists()
+    with Image.open(tif_path) as m_img:
+        loaded = np.asarray(m_img)
+        assert loaded.shape == (1000, 1000)
+        assert int(loaded[320, 320]) == 1
 
-    def test_spatial_helpers_and_filtering(self) -> None:
-        det1 = Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.9, class_id=0, label="colony")  # center (20, 20)
-        det2 = Detection(bbox=(100.0, 100.0, 120.0, 120.0), score=0.8, class_id=0, label="colony")  # center (110, 110)
-        res = InferenceResult(
-            image_path=None,
-            image_size=(200, 200),
-            detections=[det1, det2],
-            colony_count=2,
-            num_slices=1,
-            execution_time_seconds=0.01,
-        )
+    overlay_path = tmp_path / "overlay.png"
+    result.draw_overlay(img, output_path=overlay_path, show_labels=True)
+    assert overlay_path.exists()
 
-        # Test helper properties
-        self.assertEqual(res.bboxes, [(10.0, 10.0, 30.0, 30.0), (100.0, 100.0, 120.0, 120.0)])
-        self.assertEqual(res.centers, [(20.0, 20.0), (110.0, 110.0)])
-        self.assertEqual(res.scores, [0.9, 0.8])
+    json_path = result.save_json(tmp_path / "pred.json")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["colony_count"] == 4
+    assert len(payload["detections"]) == 4
 
-        # Test numpy conversions
-        arr_5 = res.to_numpy(include_score=True)
-        self.assertEqual(arr_5.shape, (2, 5))
-        self.assertEqual(arr_5[0, 4], 0.9)
-
-        centers_arr = res.centers_numpy()
-        self.assertEqual(centers_arr.shape, (2, 2))
-        self.assertEqual(centers_arr[0, 0], 20.0)
-        self.assertEqual(centers_arr[0, 1], 20.0)
-
-        # Test ROI filtering (e.g. drop quadrant 1)
-        roi_dets = res.filter_by_roi(x1=0.0, y1=0.0, x2=50.0, y2=50.0)
-        self.assertEqual(len(roi_dets), 1)
-        self.assertEqual(roi_dets[0].center, (20.0, 20.0))
-
-        # Test circle filtering (e.g. pipetted spot centered at (20, 20) with radius 15)
-        spot_dets = res.filter_by_circle(cx=20.0, cy=20.0, radius=15.0)
-        self.assertEqual(len(spot_dets), 1)
-        self.assertEqual(spot_dets[0].center, (20.0, 20.0))
-
-        # Circle that doesn't cover either
-        empty_spot = res.filter_by_circle(cx=50.0, cy=50.0, radius=5.0)
-        self.assertEqual(len(empty_spot), 0)
-
-    def test_return_raw_detections(self) -> None:
-        mock_model = MockModel([Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.9, class_id=0, label="colony")])
-        cfg = EngineConfig()
-        cfg.slicing.slice_width = 200
-        cfg.slicing.slice_height = 200
-        engine = AutoCFUEngine(model=mock_model, config=cfg)
-
-        img = Image.new("RGB", (200, 200), color=(128, 128, 128))
-        res_with_raw = engine.infer_image(img, return_raw=True)
-        self.assertIsNotNone(res_with_raw.raw_detections)
-        assert res_with_raw.raw_detections is not None
-        self.assertEqual(len(res_with_raw.raw_detections), 1)
-
-        res_without_raw = engine.infer_image(img, return_raw=False)
-        self.assertIsNone(res_without_raw.raw_detections)
-
-    def test_pipeline_intra_tile_nms_forwarding(self) -> None:
-        passed_kwargs: dict[str, Any] = {}
-
-        class IntraTileModel:
-            def predict_slice(
-                self,
-                crop: Any,
-                confidence_threshold: float = 0.35,
-                target_class_id: int | None = 0,
-                class_name: str = "colony",
-                intra_tile_nms_threshold: float = 0.0,
-                intra_tile_match_metric: str = "ios",
-            ) -> list[Detection]:
-                passed_kwargs["intra_tile_nms_threshold"] = intra_tile_nms_threshold
-                passed_kwargs["intra_tile_match_metric"] = intra_tile_match_metric
-                return [Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.9, class_id=0, label="colony")]
-
-        cfg = EngineConfig()
-        cfg.inference.intra_tile_nms_threshold = 0.45
-        cfg.inference.intra_tile_match_metric = "ios"
-        cfg.slicing.slice_width = 200
-        cfg.slicing.slice_height = 200
-
-        engine = AutoCFUEngine(model=IntraTileModel(), config=cfg)
-        img = Image.new("RGB", (200, 200))
-        res = engine.infer_image(img)
-        self.assertEqual(res.colony_count, 1)
-        self.assertEqual(passed_kwargs.get("intra_tile_nms_threshold"), 0.45)
-        self.assertEqual(passed_kwargs.get("intra_tile_match_metric"), "ios")
+    csv_path = result.save_csv(tmp_path / "pred.csv")
+    rows = list(csv.reader(csv_path.open("r", encoding="utf-8")))
+    assert len(rows) == 5
+    assert rows[0][:4] == ["instance_id", "label", "class_id", "score"]
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_countability_engine_both_scope(tmp_path: Path) -> None:
+    cfg = EngineConfig(
+        slicing=SlicingConfig(slice_width=640, slice_height=640, overlap_width_ratio=0.20, overlap_height_ratio=0.20),
+        inference=InferenceConfig(model_type="countability", countability_scope="both"),
+    )
+    engine = AutoCFUEngine(
+        model_path=tmp_path / "cnt.onnx", config=cfg, model=cast(AnyONNXModel, _StubCountabilityModel())
+    )
+
+    img = np.zeros((1000, 1000, 3), dtype=np.uint8)
+    result = engine.predict(img)
+    assert result.model_type == "countability"
+    assert result.is_countable is True
+    assert result.countability_report is not None
+    assert result.countability_report.total_sections == 4
+    assert result.countability_report.uncountable_section_count == 4
+
+    overlay_path = tmp_path / "cnt_overlay.png"
+    result.draw_overlay(img, output_path=overlay_path)
+    assert overlay_path.exists()
+
+    json_path = result.save_json(tmp_path / "cnt.json")
+    parsed = json.loads(json_path.read_text(encoding="utf-8"))
+    assert parsed["countability"]["is_countable"] is True
+
+    csv_path = result.save_csv(tmp_path / "cnt.csv")
+    rows = list(csv.reader(csv_path.open("r", encoding="utf-8")))
+    assert len(rows) == 6
+
+    summary_csv = export_batch_summary_csv([result], tmp_path / "summary.csv")
+    sum_rows = list(csv.reader(summary_csv.open("r", encoding="utf-8")))
+    assert len(sum_rows) == 2
+
+
+def test_plate_countability_report_sections_only() -> None:
+    sec_cnt = CountabilityResult((0.1, 0.8, 0.1), (0.0, 0.0, 0.0), 1, "countable", True, 0.9, 0.1, (0, 0, 640, 640))
+    sec_unc = CountabilityResult(
+        (0.0, 0.1, 0.9), (0.0, 0.0, 0.0), 2, "uncountable", False, 0.1, 0.9, (640, 0, 1280, 640)
+    )
+    rep = PlateCountabilityReport(whole_plate=None, section_predictions=[sec_cnt, sec_unc], uncountable_threshold=0.4)
+    # Mean P(uncountable) = 0.50 >= 0.40 => False
+    assert rep.is_countable is False
+    res = InferenceResult(image_path=None, image_size=(1280, 640), model_type="countability", countability_report=rep)
+    assert res.is_countable is False

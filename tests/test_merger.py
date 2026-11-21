@@ -1,166 +1,92 @@
-"""Unit tests for calculate_iou, GreedyNMM, and NMS mergers."""
+"""Unit tests for CenterNet/StarDist Detection geometry, metrics, and mergers."""
 
 from __future__ import annotations
 
-import tests  # noqa: F401  # isort: skip
+import math
 
-import unittest
+import pytest
 
-from autocfu.merger import NMS, Detection, GreedyNMM, calculate_ios, calculate_iou, get_merger
-
-
-class TestMerger(unittest.TestCase):
-    def test_calculate_iou(self) -> None:
-        # Identical boxes
-        box_a = [0.0, 0.0, 10.0, 10.0]
-        self.assertAlmostEqual(calculate_iou(box_a, box_a), 1.0)
-
-        # Disjoint boxes
-        box_b = [20.0, 20.0, 30.0, 30.0]
-        self.assertAlmostEqual(calculate_iou(box_a, box_b), 0.0)
-
-        # Partial overlap: Box A [0, 0, 10, 10] (area 100), Box C [5, 0, 15, 10] (area 100)
-        # Intersection: [5, 0, 10, 10] -> width 5, height 10 -> area 50
-        # Union: 100 + 100 - 50 = 150 -> IoU = 50 / 150 = 1/3
-        box_c = [5.0, 0.0, 15.0, 10.0]
-        self.assertAlmostEqual(calculate_iou(box_a, box_c), 1.0 / 3.0)
-
-        # Zero-area box
-        empty_box = [5.0, 5.0, 5.0, 5.0]
-        self.assertAlmostEqual(calculate_iou(box_a, empty_box), 0.0)
-
-    def test_greedy_nmm_merging(self) -> None:
-        """Test that overlapping boxes are merged with score-weighted centroid coordinates."""
-        merger = GreedyNMM(iou_threshold=0.50)
-
-        # Box 1: [10, 10, 30, 30] score 0.8
-        # Box 2: [12, 12, 32, 32] score 0.2
-        # Intersection: [12, 12, 30, 30] -> width 18, height 18 -> 324
-        # Area 1: 400, Area 2: 400 -> Union: 800 - 324 = 476 -> IoU = 324 / 476 = 0.6806 > 0.50
-        det1 = Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.8, class_id=0, label="colony")
-        det2 = Detection(bbox=(12.0, 12.0, 32.0, 32.0), score=0.2, class_id=0, label="colony")
-
-        merged = merger.merge([det1, det2])
-        self.assertEqual(len(merged), 1)
-
-        result = merged[0]
-        self.assertEqual(result.class_id, 0)
-        self.assertAlmostEqual(result.score, 0.8)
-
-        # Expected weighted coordinates:
-        # x1 = (10.0 * 0.8 + 12.0 * 0.2) / 1.0 = 8.0 + 2.4 = 10.4
-        # y1 = (10.0 * 0.8 + 12.0 * 0.2) / 1.0 = 10.4
-        # x2 = (30.0 * 0.8 + 32.0 * 0.2) / 1.0 = 24.0 + 6.4 = 30.4
-        # y2 = (30.0 * 0.8 + 32.0 * 0.2) / 1.0 = 30.4
-        self.assertAlmostEqual(result.x1, 10.4)
-        self.assertAlmostEqual(result.y1, 10.4)
-        self.assertAlmostEqual(result.x2, 30.4)
-        self.assertAlmostEqual(result.y2, 30.4)
-
-    def test_greedy_nmm_disjoint_boxes(self) -> None:
-        """Detections far apart should not be merged."""
-        merger = GreedyNMM(iou_threshold=0.50)
-        det1 = Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.9, class_id=0, label="colony")
-        det2 = Detection(bbox=(100.0, 100.0, 120.0, 120.0), score=0.85, class_id=0, label="colony")
-
-        merged = merger.merge([det1, det2])
-        self.assertEqual(len(merged), 2)
-        self.assertEqual(merged[0].score, 0.9)
-        self.assertEqual(merged[1].score, 0.85)
-
-    def test_greedy_nmm_different_classes(self) -> None:
-        """Overlapping detections of different classes should remain separate by default."""
-        merger = GreedyNMM(iou_threshold=0.30, class_agnostic=False)
-        det1 = Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.9, class_id=0, label="colony")
-        det2 = Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.8, class_id=1, label="defect")
-
-        merged = merger.merge([det1, det2])
-        self.assertEqual(len(merged), 2)
-
-    def test_standard_nms(self) -> None:
-        """Standard NMS should suppress the lower score candidate without altering coordinates."""
-        nms = NMS(iou_threshold=0.50)
-        det1 = Detection(bbox=(10.0, 10.0, 30.0, 30.0), score=0.95, class_id=0, label="colony")
-        det2 = Detection(bbox=(11.0, 11.0, 31.0, 31.0), score=0.70, class_id=0, label="colony")
-
-        survivors = nms.merge([det1, det2])
-        self.assertEqual(len(survivors), 1)
-        self.assertEqual(survivors[0].bbox, (10.0, 10.0, 30.0, 30.0))
-        self.assertEqual(survivors[0].score, 0.95)
-
-    def test_empty_and_single_input(self) -> None:
-        merger = GreedyNMM()
-        self.assertEqual(merger.merge([]), [])
-
-        single = [Detection(bbox=(0.0, 0.0, 10.0, 10.0), score=0.9, class_id=0, label="colony")]
-        merged = merger.merge(single)
-        self.assertEqual(len(merged), 1)
-        self.assertEqual(merged[0].bbox, (0.0, 0.0, 10.0, 10.0))
-
-    def test_get_merger_factory(self) -> None:
-        m1 = get_merger("greedy_nmm", 0.45)
-        self.assertIsInstance(m1, GreedyNMM)
-        self.assertEqual(m1.iou_threshold, 0.45)
-
-        m2 = get_merger("nms", 0.60)
-        self.assertIsInstance(m2, NMS)
-        self.assertEqual(m2.iou_threshold, 0.60)
-
-    def test_match_threshold_alias(self) -> None:
-        """Verify match_threshold keyword parameter acts as an alias for iou_threshold."""
-        gnmm = GreedyNMM(match_threshold=0.55)
-        self.assertEqual(gnmm.iou_threshold, 0.55)
-
-        nms = NMS(match_threshold=0.65)
-        self.assertEqual(nms.iou_threshold, 0.65)
-
-        factory_gnmm = get_merger("greedy_nmm", match_threshold=0.48)
-        self.assertEqual(factory_gnmm.iou_threshold, 0.48)
-
-    def test_calculate_ios(self) -> None:
-        # Box A: [0, 0, 10, 10] (area 100)
-        # Box B: [0, 0, 5, 5] (area 25, fully inside Box A)
-        box_a = [0.0, 0.0, 10.0, 10.0]
-        box_b = [0.0, 0.0, 5.0, 5.0]
-        # IoS = intersection / min_area = 25 / 25 = 1.0
-        self.assertAlmostEqual(calculate_ios(box_a, box_b), 1.0)
-        # Disjoint
-        box_c = [20.0, 20.0, 30.0, 30.0]
-        self.assertAlmostEqual(calculate_ios(box_a, box_c), 0.0)
-
-    def test_ios_merging(self) -> None:
-        # One large box and one small box completely inside it
-        # IoU would be 25 / 100 = 0.25 (below 0.5)
-        # IoS is 25 / 25 = 1.0 (above 0.5)
-        det_large = Detection(bbox=(0.0, 0.0, 10.0, 10.0), score=0.9, class_id=0, label="colony")
-        det_small = Detection(bbox=(0.0, 0.0, 5.0, 5.0), score=0.8, class_id=0, label="colony")
-
-        merger_iou = GreedyNMM(iou_threshold=0.50, match_metric="iou")
-        self.assertEqual(len(merger_iou.merge([det_large, det_small])), 2)
-
-        merger_ios = GreedyNMM(iou_threshold=0.50, match_metric="ios")
-        self.assertEqual(len(merger_ios.merge([det_large, det_small])), 1)
-
-    def test_invalid_match_metric(self) -> None:
-        with self.assertRaises(ValueError):
-            GreedyNMM(match_metric="invalid")
-        with self.assertRaises(ValueError):
-            NMS(match_metric="invalid")
-
-    def test_detection_spatial_properties(self) -> None:
-        det = Detection(bbox=(10.0, 20.0, 50.0, 60.0), score=0.95, class_id=0, label="colony")
-        self.assertAlmostEqual(det.width, 40.0)
-        self.assertAlmostEqual(det.height, 40.0)
-        self.assertAlmostEqual(det.area, 1600.0)
-        self.assertAlmostEqual(det.cx, 30.0)
-        self.assertAlmostEqual(det.cy, 40.0)
-        self.assertEqual(det.center, (30.0, 40.0))
-        self.assertAlmostEqual(det.radius, 20.0)
-
-        d = det.to_dict()
-        self.assertEqual(d["center"], [30.0, 40.0])
-        self.assertEqual(d["bbox"], [10.0, 20.0, 50.0, 60.0])
+from autocfu.merger import (
+    NMS,
+    Detection,
+    GreedyNMM,
+    calculate_center_distance_ratio,
+    calculate_ios,
+    calculate_iou,
+    get_merger,
+    reconstruct_star_polygon,
+)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_detection_auto_population_modes() -> None:
+    cn_det = Detection(score=0.9, center_xy=(100.0, 200.0), radius_px=15.0)
+    assert cn_det.bbox == (85.0, 185.0, 115.0, 215.0)
+    assert cn_det.width == pytest.approx(30.0)
+    assert cn_det.height == pytest.approx(30.0)
+
+    rays = [10.0] * 32
+    sd_det = Detection(score=0.85, center_xy=(50.0, 60.0), rays=rays)
+    assert sd_det.polygon is not None
+    assert len(sd_det.polygon) == 32
+    assert sd_det.polygon[0][0] == pytest.approx(60.0, abs=1e-6)
+    assert sd_det.polygon[0][1] == pytest.approx(60.0, abs=1e-6)
+    assert sd_det.polygon[8][0] == pytest.approx(50.0, abs=1e-6)
+    assert sd_det.polygon[8][1] == pytest.approx(70.0, abs=1e-6)
+    assert sd_det.bbox is not None
+    assert sd_det.bbox[0] == pytest.approx(40.0, abs=1e-6)
+    assert sd_det.bbox[2] == pytest.approx(60.0, abs=1e-6)
+
+
+def test_reconstruct_star_polygon_empty_raises() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        reconstruct_star_polygon(0.0, 0.0, [])
+
+
+def test_geometry_metrics_iou_ios_center_dist() -> None:
+    box_a = (0.0, 0.0, 20.0, 20.0)
+    box_b = (10.0, 10.0, 30.0, 30.0)
+    assert calculate_iou(box_a, box_b) == pytest.approx(100.0 / 700.0)
+    assert calculate_ios(box_a, box_b) == pytest.approx(100.0 / 400.0)
+
+    det_a = Detection(score=0.9, center_xy=(100.0, 200.0), radius_px=10.0)
+    det_b = Detection(score=0.5, center_xy=(103.0, 204.0), radius_px=20.0)
+    assert calculate_center_distance_ratio(det_a, det_b) == pytest.approx(0.5)
+
+    det_zero = Detection(bbox=(0.0, 0.0, 0.0, 0.0), score=0.5, center_xy=(0.0, 0.0), radius_px=0.0)
+    assert math.isinf(calculate_center_distance_ratio(det_zero, det_a))
+
+
+def test_greedy_nmm_merges_stardist_rays_and_centernet_weighted() -> None:
+    det_a = Detection(score=0.9, center_xy=(100.0, 200.0), rays=[10.0] * 32)
+    det_b = Detection(score=0.3, center_xy=(103.0, 204.0), rays=[20.0] * 32)
+
+    merger = GreedyNMM(match_threshold=0.6, match_metric="center_dist")
+    merged = merger.merge([det_b, det_a])
+    assert len(merged) == 1
+    out = merged[0]
+    assert out.score == pytest.approx(0.9)
+    assert out.center_xy is not None
+    assert out.center_xy[0] == pytest.approx(100.75, abs=1e-6)
+    assert out.center_xy[1] == pytest.approx(201.0, abs=1e-6)
+    assert out.radius_px == pytest.approx(12.5, abs=1e-6)
+    assert out.rays is not None and len(out.rays) == 32
+    assert out.rays[0] == pytest.approx(12.5, abs=1e-6)
+    assert out.polygon is not None
+    assert out.polygon[0][0] == pytest.approx(113.25, abs=1e-6)
+
+
+def test_nms_and_get_merger_factory() -> None:
+    d1 = Detection(score=0.9, center_xy=(50.0, 50.0), radius_px=10.0)
+    d2 = Detection(score=0.6, center_xy=(52.0, 50.0), radius_px=10.0)
+    d3 = Detection(score=0.8, center_xy=(200.0, 200.0), radius_px=10.0)
+
+    nms = get_merger("nms", match_threshold=0.5, match_metric="center_dist")
+    assert isinstance(nms, NMS)
+    kept = nms.merge([d2, d1, d3])
+    assert len(kept) == 2
+    assert kept[0].score == pytest.approx(0.9)
+    assert kept[1].score == pytest.approx(0.8)
+
+    assert get_merger("none", 0.5, "iou") is None
+    with pytest.raises(ValueError, match="merger_type"):
+        get_merger("unknown")

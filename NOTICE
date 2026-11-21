@@ -1,22 +1,58 @@
-AutoCFU Colony Detection and Inference System
+AutoCFU Colony Detection, Segmentation, and Countability Inference System
 Copyright 2024-2026 Andreas Sagen
 
-This product includes software developed by Andreas Sagen.
+This product includes software developed by Andreas Sagen and is licensed
+under the Apache License, Version 2.0 (see LICENSE and
+licenses/LICENSE-APACHE-2.0.txt).
+
+COMMERCIAL USE GUARANTEE (CODE & MODEL ARCHITECTURES):
+All inference software (Python and Rust), slicing/merging algorithms, and
+supported model architectures (Radial CenterNet, 2D StarDist, and
+TorchVision-based Countability Classifier) in this repository are implemented
+with commercially permissive open-source licenses (Apache-2.0, MIT, and
+BSD-3-Clause). Commercial deployment of this inference engine and model
+architectures with proprietary or permissively licensed weights is explicitly
+permitted.
 
 ================================================================================
-Third-Party Software and Datasets Notice
+Third-Party Software, Methodologies, and Datasets Notice
 ================================================================================
 
-1. RT-DETR / RT-DETRv4 (Real-Time DEtection TRansformer)
-   Website: https://github.com/AIMIA-PKU/RT-DETRv4
-   License: Apache License 2.0 (see licenses/LICENSE-RT-DETRv4.txt)
-   Copyright (c) 2025 The RT-DETRv4 Authors
+1. Radial CenterNet / CenterNet ("Objects as Points") Methodology
+   Website: https://github.com/xingyizhou/CenterNet
+   License: MIT License (see licenses/LICENSE-CENTERNET-MIT.txt)
+   Copyright (c) 2019 Xingyi Zhou, Dequan Wang, Philipp Krähenbühl
    Reference:
-     Zijun Liao, Yian Zhao, Xin Shan, Yu Yan, Chang Liu, Lei Lu, Xiangyang Ji, Jie Chen.
-     "RT-DETRv4: Painlessly Furthering Real-Time Object Detection with Vision Foundation Models"
-     arXiv preprint arXiv:2510.25257, 2025.
+     Zhou, X., Wang, D., & Krähenbühl, P.
+     "Objects as Points." arXiv preprint arXiv:1904.07850, 2019.
 
-2. AGAR Dataset (Annotated Germs for Automated Recognition)
+2. StarDist (2D Star-Convex Polygon Instance Segmentation) Methodology
+   Website: https://github.com/stardist/stardist
+   License: BSD 3-Clause License (see licenses/LICENSE-STARDIST-BSD3.txt)
+   Copyright (c) 2018-2024 Uwe Schmidt, Martin Weigert
+   Reference:
+     Schmidt, U., Weigert, M., Broaddus, C., & Myers, G.
+     "Cell Detection with Star-Convex Polygons."
+     MICCAI 2018, LNCS 11071, pp. 265-273, 2018.
+
+3. TorchVision / PyTorch Model Backbones (ResNet & MobileNetV3)
+   Website: https://github.com/pytorch/vision
+   License: BSD 3-Clause License (see licenses/LICENSE-TORCHVISION-BSD3.txt)
+   Copyright (c) 2016-present Meta Platforms, Inc. and affiliates
+
+4. SAHI (Slicing Aided Hyper Inference) Methodology
+   Website: https://github.com/obss/sahi
+   License: MIT License (see licenses/LICENSE-SAHI.txt)
+   Copyright (c) 2021 Fatih Cagatay Akyon
+   Reference:
+     Akyon, F. C., Altinuc, S. O., & Temizel, A.
+     "Slicing Aided Hyper Inference and Fine-tuning for Small Object Detection."
+     2022 IEEE International Conference on Image Processing (ICIP), 966-970, 2022.
+
+5. ONNX Runtime (Python & Rust `ort`)
+   License: MIT License (Microsoft Corporation / pykeio)
+
+6. AGAR Dataset (Annotated Germs for Automated Recognition — Proof of Concept Only)
    License: Creative Commons Attribution-NonCommercial 2.0 Generic (CC BY-NC 2.0)
             (see licenses/LICENSE-AGAR-DATASET.txt)
    Copyright (c) NeuroSYS and University of Wrocław
@@ -26,16 +62,10 @@ Third-Party Software and Datasets Notice
      "AGAR a microbial colony dataset for deep learning detection."
      Data in Brief, 39, 107641, 2021.
    IMPORTANT COMPLIANCE NOTICE:
-     The AGAR dataset is provided under the Creative Commons Attribution-NonCommercial
-     2.0 Generic license (CC BY-NC 2.0). Any derivative tiled datasets and any model weights
-     fine-tuned on the AGAR dataset are restricted to academic, educational, and
-     non-commercial research use only. The software code in this repository is licensed under Apache-2.0.
-
-3. SAHI (Slicing Aided Hyper Inference)
-   Website: https://github.com/obss/sahi
-   License: MIT License (see licenses/LICENSE-SAHI.txt)
-   Copyright (c) 2021 Fatih Cagatay Akyon
-   Reference:
-     Akyon, F. C., Altinuc, S. O., & Temizel, A.
-     "Slicing Aided Hyper Inference and Fine-tuning for Small Object Detection."
-     2022 IEEE International Conference on Image Processing (ICIP), 966-970, 2022.
+     The AGAR dataset and its derivative datasets (`agar_leodriesch_singleclass`
+     and `agar_leodriesch_countability`) are used solely for academic,
+     educational, and proof-of-concept evaluation under CC BY-NC 2.0. Any model
+     weights trained directly on AGAR data inherit non-commercial dataset terms,
+     whereas this repository's software code and model architectures remain
+     100% Apache-2.0 / MIT / BSD-3-Clause for commercial use with independent
+     or proprietary datasets.

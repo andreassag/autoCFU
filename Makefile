@@ -1,123 +1,69 @@
-.PHONY: help install pre-commit test lint typecheck format docs docs-clean clean act update-deps
+.PHONY: help install test lint typecheck format docs docs-clean pre-commit clean rust-fmt rust-lint rust-test rust-build rust-doc all-checks update-deps act
 
-VENV ?= .venv
-PYTHON ?= $(VENV)/bin/python
-UV ?= uv
-PRECOMMIT ?= $(VENV)/bin/pre-commit
-PYTEST ?= $(VENV)/bin/pytest
-RUFF ?= $(VENV)/bin/ruff
-TY ?= $(VENV)/bin/ty
-SPHINXBUILD ?= $(VENV)/bin/sphinx-build
+PYTHON ?= .venv/bin/python
+RUFF ?= .venv/bin/ruff
+TY ?= .venv/bin/ty
+PYTEST ?= .venv/bin/pytest
+SPHINXBUILD ?= .venv/bin/sphinx-build
+CARGO ?= cargo
 
-help:
-	@echo "Available commands:"
-	@echo "  make install         - Create virtualenv, install dependencies, and setup pre-commit"
-	@echo "  make pre-commit      - Run pre-commit checks on all files"
-	@echo "  make test            - Run unit tests on the inference engine"
-	@echo "  make lint            - Run linter and type checks (ruff, ty)"
-	@echo "  make typecheck       - Run static type checker (ty)"
-	@echo "  make format          - Format python code (ruff)"
-	@echo "  make docs            - Build Sphinx HTML documentation"
-	@echo "  make docs-clean      - Remove Sphinx build artifacts"
-	@echo "  make clean           - Remove build, cache, and test artifacts"
-	@echo "  make act             - Run GitHub Actions CI locally using act"
-	@echo "  make update-deps     - Upgrade dependencies and run formatting, linting, and tests"
+help: ## Show available targets
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-install:
-	@if command -v $(UV) >/dev/null 2>&1; then \
-		echo "Creating virtual environment and installing with $(UV)..."; \
-		$(UV) venv --allow-existing $(VENV) --python 3.12 2>/dev/null || $(UV) venv --allow-existing $(VENV); \
-		$(UV) pip install --python $(PYTHON) -e ".[dev,docs]"; \
+install: ## Create virtualenv, install package with dev/docs extras, and configure pre-commit
+	@if command -v uv >/dev/null 2>&1; then \
+		uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev,docs]"; \
 	else \
-		echo "Creating virtual environment with python3..."; \
-		python3 -m venv $(VENV); \
-		$(PYTHON) -m pip install --upgrade pip; \
-		$(PYTHON) -m pip install -e ".[dev,docs]"; \
+		python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -e ".[dev,docs]"; \
 	fi
-	@echo "Installing pre-commit git hooks..."
-	@if [ -f $(PRECOMMIT) ]; then \
-		$(PRECOMMIT) install; \
-	elif command -v pre-commit >/dev/null 2>&1; then \
-		pre-commit install; \
-	fi
+	@if [ -d .git ]; then .venv/bin/pre-commit install || true; fi
 
-pre-commit:
-	@if [ -f $(PRECOMMIT) ]; then \
-		$(PRECOMMIT) run --all-files; \
-	elif command -v pre-commit >/dev/null 2>&1; then \
-		pre-commit run --all-files; \
-	else \
-		echo "pre-commit not found. Run 'make install' first."; exit 1; \
-	fi
+format: ## Format Python code with ruff
+	$(RUFF) format src/ tests/
 
-test:
-	@if [ -x $(PYTHON) ] && [ -f $(PYTEST) ]; then \
-		$(PYTEST) tests; \
-	else \
-		PYTHONPATH=src python3 -m unittest discover -s tests; \
-	fi
+lint: ## Run ruff lint + ty static type checks
+	$(RUFF) format --check src/ tests/
+	$(RUFF) check src/ tests/
+	$(TY) check src/ tests/
 
-lint:
-	@if [ -f $(RUFF) ]; then \
-		$(RUFF) check src/ tests/; \
-	elif command -v ruff >/dev/null 2>&1; then \
-		ruff check src/ tests/; \
-	else \
-		echo "ruff not found. Run 'make install' first."; exit 1; \
-	fi
-	@if [ -f $(TY) ]; then \
-		$(TY) check src/ tests/; \
-	elif command -v ty >/dev/null 2>&1; then \
-		ty check src/ tests/; \
-	else \
-		echo "ty not found. Run 'make install' first."; exit 1; \
-	fi
+typecheck: ## Run ty static type checking
+	$(TY) check src/ tests/
 
-typecheck:
-	@if [ -f $(TY) ]; then \
-		$(TY) check src/ tests/; \
-	elif command -v ty >/dev/null 2>&1; then \
-		ty check src/ tests/; \
-	else \
-		echo "ty not found. Run 'make install' first."; exit 1; \
-	fi
+test: ## Run Python unit and parity test suite
+	$(PYTEST) tests/ -v
 
-format:
-	@if [ -f $(RUFF) ]; then \
-		$(RUFF) format src/ tests/; \
-	elif command -v ruff >/dev/null 2>&1; then \
-		ruff format src/ tests/; \
-	else \
-		echo "ruff not found. Run 'make install' first."; exit 1; \
-	fi
+docs: ## Build Sphinx HTML documentation with warnings treated as errors
+	$(SPHINXBUILD) -b html -W docs docs/_build/html
 
-docs:
-	@if [ -f $(SPHINXBUILD) ]; then \
-		$(SPHINXBUILD) -b html -W docs docs/_build/html; \
-	elif command -v sphinx-build >/dev/null 2>&1; then \
-		sphinx-build -b html -W docs docs/_build/html; \
-	elif [ -f $(PYTHON) ]; then \
-		$(PYTHON) -m sphinx -b html -W docs docs/_build/html; \
-	else \
-		python3 -m sphinx -b html -W docs docs/_build/html; \
-	fi
+docs-clean: ## Remove built Sphinx HTML documentation
+	rm -rf docs/_build
 
-docs-clean:
-	@rm -rf docs/_build
+rust-fmt: ## Check Rust formatting with rustfmt
+	$(CARGO) fmt --all -- --check
 
-clean:
-	@rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .ruff_cache docs/_build
-	@find . -type d -name "__pycache__" -exec rm -rf {} +
+rust-lint: ## Lint Rust codebase with clippy (-D warnings)
+	$(CARGO) clippy --all-targets -- -D warnings
 
-act:
-	@if command -v gh >/dev/null 2>&1 && gh act --version >/dev/null 2>&1; then \
-		gh act pull_request; \
-	elif command -v act >/dev/null 2>&1; then \
-		act pull_request; \
-	else \
-		echo "Neither 'act' nor 'gh act' extension found. Please install act (https://github.com/nektos/act) or run 'gh extension install nektos/gh-act'."; exit 1; \
-	fi
+rust-test: ## Run Rust unit tests across lib and binary targets
+	$(CARGO) test --all-targets
 
-update-deps:
-	@chmod +x scripts/update_dependencies.sh
-	@./scripts/update_dependencies.sh
+rust-build: ## Build release binary of Rust CLI
+	$(CARGO) build --release
+
+rust-doc: ## Generate Rust crate documentation
+	$(CARGO) doc --no-deps
+
+all-checks: lint test docs rust-fmt rust-lint rust-test rust-doc ## Run full Python & Rust verification suite
+
+pre-commit: ## Run all pre-commit hooks across repository files
+	.venv/bin/pre-commit run --all-files
+
+clean: ## Remove Python/Rust/Sphinx build artifacts and caches
+	rm -rf build/ dist/ *.egg-info .pytest_cache .ruff_cache docs/_build
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+
+update-deps: ## Run automated dependency update check
+	./scripts/update_dependencies.sh
+
+act: ## Execute GitHub Actions workflow locally using gh act
+	gh act pull_request
